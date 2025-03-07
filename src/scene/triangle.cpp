@@ -22,26 +22,63 @@ Triangle::Triangle(const Mesh *mesh, size_t v1, size_t v2, size_t v3) {
 
 BBox Triangle::get_bbox() const { return bbox; }
 
-bool Triangle::has_intersection(const Ray &r) const {
-  // Part 1, Task 3: implement ray-triangle intersection
-  // The difference between this function and the next function is that the next
-  // function records the "intersection" while this function only tests whether
-  // there is a intersection.
+bool Triangle::has_intersection(const Ray& r) const {
+  Vector3D e1 = p2 - p1;
+  Vector3D e2 = p3 - p1;
+  Vector3D s1 = cross(r.d, e2);
+  double det = dot(e1, s1);
 
+  if (det > -1e-6 && det < 1e-6) {
+    return false; // Ray is parallel to the triangle
+  }
+
+  Vector3D s = r.o - p1;
+  double b1 = dot(s, s1) / det;
+  if (b1 < 0.0 || b1 > 1.0) return false;
+
+  Vector3D s2 = cross(s, e1);
+  double b2 = dot(r.d, s2) / det;
+  if (b2 < 0.0 || (b1 + b2) > 1.0) return false;
+
+  double t = dot(e2, s2) / det;
+  if (t < r.min_t || t > r.max_t) return false;
 
   return true;
-
 }
 
-bool Triangle::intersect(const Ray &r, Intersection *isect) const {
-  // Part 1, Task 3:
-  // implement ray-triangle intersection. When an intersection takes
-  // place, the Intersection data should be updated accordingly
 
+bool Triangle::intersect(const Ray& r, Intersection* isect) const {
+  Vector3D e1 = p2 - p1;
+  Vector3D e2 = p3 - p1;
+  Vector3D s1 = cross(r.d, e2);
+  double det = dot(e1, s1);
+
+  if (det > -1e-6 && det < 1e-6) {
+    return false; // Ray is parallel to the triangle
+  }
+
+  double inv_det = 1.0 / det;
+  Vector3D s = r.o - p1;
+  double b1 = dot(s, s1) * inv_det;
+  if (b1 < 0.0 || b1 > 1.0) return false;
+
+  Vector3D s2 = cross(s, e1);
+  double b2 = dot(r.d, s2) * inv_det;
+  if (b2 < 0.0 || (b1 + b2) > 1.0) return false;
+
+  double t = dot(e2, s2) * inv_det;
+  if (t < r.min_t || t > r.max_t) return false;
+
+  r.max_t = min(t, r.max_t);
+
+  if (isect) {
+    isect->t = t;
+    isect->primitive = this;
+    isect->n = (1 - b1 - b2) * n1 + b1 * n2 + b2 * n3; // Interpolated normal
+    isect->bsdf = get_bsdf();
+  }
 
   return true;
-
-
 }
 
 void Triangle::draw(const Color &c, float alpha) const {
