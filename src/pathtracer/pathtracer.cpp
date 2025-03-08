@@ -167,6 +167,8 @@ Vector3D PathTracer::one_bounce_radiance(const Ray &r,
 
 Vector3D PathTracer::at_least_one_bounce_radiance(const Ray &r,
                                                   const Intersection &isect) {
+	if (max_ray_depth == 0) return Vector3D(0.0);
+
   Matrix3x3 o2w;
   make_coord_space(o2w, isect.n);
   Matrix3x3 w2o = o2w.T();
@@ -179,7 +181,35 @@ Vector3D PathTracer::at_least_one_bounce_radiance(const Ray &r,
   // TODO: Part 4, Task 2
   // Returns the one bounce radiance + radiance from extra bounces at this point.
   // Should be called recursively to simulate extra bounces.
+  Vector3D direct_light = one_bounce_radiance(r, isect);
 
+  if (r.depth >= max_ray_depth - 1) {
+    return direct_light; // If only last bounce is needed, return at max depth
+  }
+
+  if (isAccumBounces) {
+    L_out += direct_light; // Accumulate direct lighting
+  }
+
+  Vector3D w_in;
+  double pdf;
+  Vector3D f = isect.bsdf->sample_f(w_out, &w_in, &pdf);
+
+  if (pdf < EPS_F || f.norm() < EPS_F) return L_out; // Avoid division by zero
+
+  Vector3D w_in_world = o2w * w_in;
+  Ray new_ray(hit_p, w_in_world);
+	new_ray.min_t = EPS_F;
+  new_ray.depth = r.depth + 1;
+
+  double rr_prob = 0.35;
+  if (new_ray.depth >= max_ray_depth || coin_flip(rr_prob)) return L_out;
+
+  Intersection new_isect;
+  if (bvh->intersect(new_ray, &new_isect)) {
+    Vector3D indirect = at_least_one_bounce_radiance(new_ray, new_isect);
+    L_out += (f * indirect * abs_cos_theta(w_in)) / (pdf * (1 - rr_prob)); // Accumulate all bounces
+  }
 
   return L_out;
 }
@@ -202,7 +232,7 @@ Vector3D PathTracer::est_radiance_global_illumination(const Ray &r) {
     return envLight ? envLight->sample_dir(r) : L_out;
 
 
-  L_out = (isect.t == INF_D) ? debug_shading(r.d) : normal_shading(isect.n);
+  //L_out = (isect.t == INF_D) ? debug_shading(r.d) : normal_shading(isect.n);
 
   // TODO (Part 3): Return the direct illumination.
 
@@ -210,7 +240,7 @@ Vector3D PathTracer::est_radiance_global_illumination(const Ray &r) {
   // parts of global illumination into L_out rather than just direct
 
   //return L_out;
-	return zero_bounce_radiance(r, isect) + one_bounce_radiance(r, isect);
+	return zero_bounce_radiance(r, isect) + at_least_one_bounce_radiance(r, isect);
 }
 
 void PathTracer::raytrace_pixel(size_t x, size_t y) {
