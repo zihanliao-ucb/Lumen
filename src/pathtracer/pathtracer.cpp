@@ -244,27 +244,43 @@ Vector3D PathTracer::est_radiance_global_illumination(const Ray &r) {
 }
 
 void PathTracer::raytrace_pixel(size_t x, size_t y) {
-  // TODO (Part 1.2):
-  // Make a loop that generates num_samples camera rays and traces them
-  // through the scene. Return the average Vector3D.
-  // You should call est_radiance_global_illumination in this function.
+  int num_samples = 0;        // Current number of samples taken
+  Vector2D origin = Vector2D(x, y); // Bottom-left corner of the pixel
 
-  // TODO (Part 5):
-  // Modify your implementation to include adaptive sampling.
-  // Use the command line parameters "samplesPerBatch" and "maxTolerance"
-  int num_samples = ns_aa;          // total samples to evaluate
-  Vector2D origin = Vector2D(x, y); // bottom left corner of the pixel
-	Vector3D sampleColor(0, 0, 0);
-	for (int i = 0; i < num_samples; i++) {
-		Vector2D sample = gridSampler->get_sample();
-		Vector2D p = origin + (sample + Vector2D(0.5, 0.5));
-		Ray r = camera->generate_ray(p.x / sampleBuffer.w, p.y / sampleBuffer.h);
-		sampleColor += est_radiance_global_illumination(r) / num_samples;
-	}
+  Vector3D sampleColor(0, 0, 0);  // Accumulated radiance
+  double s1 = 0, s2 = 0;          // Accumulators for mean and variance
 
-  sampleBuffer.update_pixel(sampleColor, x, y);
+  for (int i = 0; i < ns_aa; i++) {
+    Vector2D sample = gridSampler->get_sample();
+    Vector2D p = origin + (sample + Vector2D(0.5, 0.5));
+    Ray r = camera->generate_ray(p.x / sampleBuffer.w, p.y / sampleBuffer.h);
+    Vector3D radiance = est_radiance_global_illumination(r);
+
+    double illum = radiance.illum(); // Convert to scalar luminance
+    s1 += illum;
+    s2 += illum * illum;
+
+    sampleColor += radiance;
+    num_samples++;
+
+    // Perform adaptive sampling check every samplesPerBatch
+    if (num_samples % samplesPerBatch == 0) {
+      double mean = s1 / num_samples;
+      double variance = (s2 - (s1 * s1) / num_samples) / (num_samples - 1);
+      double stddev = sqrt(variance);
+			double I = 1.96 * stddev / sqrt(num_samples);
+
+      // Check convergence condition
+      if (I <= maxTolerance * mean) {
+        break; // Stop sampling if converged
+      }
+    }
+  }
+
+  sampleBuffer.update_pixel(sampleColor / num_samples, x, y);
   sampleCountBuffer[x + y * sampleBuffer.w] = num_samples;
 }
+
 
 void PathTracer::autofocus(Vector2D loc) {
   Ray r = camera->generate_ray(loc.x / sampleBuffer.w, loc.y / sampleBuffer.h);
