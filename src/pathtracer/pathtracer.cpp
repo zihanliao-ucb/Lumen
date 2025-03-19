@@ -240,7 +240,10 @@ Vector3D PathTracer::est_radiance_global_illumination(const Ray &r) {
   // parts of global illumination into L_out rather than just direct
 
   //return L_out;
-	return zero_bounce_radiance(r, isect) + at_least_one_bounce_radiance(r, isect);
+  if (~isAccumBounces && max_ray_depth > 0)
+    return at_least_one_bounce_radiance(r, isect);
+  else
+    return zero_bounce_radiance(r, isect) + at_least_one_bounce_radiance(r, isect);
 }
 
 void PathTracer::raytrace_pixel(size_t x, size_t y) {
