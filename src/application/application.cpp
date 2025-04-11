@@ -153,7 +153,9 @@ void Application::render() {
       if (show_hud) draw_hud();
       break;
     case VISUALIZE_MODE:
-      if (show_coordinates) draw_coordinates();
+      //if (show_coordinates) draw_coordinates();
+			scene->render_in_opengl();
+      break;
     case RENDER_MODE:
       renderer->update_screen();
       break;
@@ -242,6 +244,7 @@ void Application::load(SceneInfo* sceneInfo) {
     Collada::Node& node = nodes[i];
     Collada::Instance *instance = node.instance;
     const Matrix4x4& transform = node.transform;
+    std::cout << "Node Type: " << node.instance->type << " Node name: " << node.name << std::endl;
 
     switch(instance->type) {
       case Collada::Instance::CAMERA:
@@ -261,9 +264,15 @@ void Application::load(SceneInfo* sceneInfo) {
           init_sphere(static_cast<SphereInfo&>(*instance), transform));
         break;
       case Collada::Instance::POLYMESH:
-        objects.push_back(
-          init_polymesh(static_cast<PolymeshInfo&>(*instance), transform));
+      {
+        GLScene::SceneObject* cur_mesh = init_polymesh(static_cast<PolymeshInfo&>(*instance), transform);
+        objects.push_back(cur_mesh);
+        if (node.name == "Mesh") {
+					std::cout << "controll mesh name is: " << node.name << std::endl;
+          controll_mesh = static_cast<GLScene::Mesh*>(cur_mesh);
+        }
         break;
+      }
       case Collada::Instance::MATERIAL:
         init_material(static_cast<MaterialInfo&>(*instance));
         break;
@@ -422,6 +431,21 @@ void Application::mouse_event(int key, int event, unsigned char mods) {
   }
 }
 
+void Application::move_obj(int key) {
+	if (key == 'w' || key == 'W') {
+    controll_mesh->move(0, 0.05);
+	}
+	else if (key == 's' || key == 'S') {
+    controll_mesh->move(0, -0.05);
+	}
+	else if (key == 'a' || key == 'A') {
+    controll_mesh->move(-0.05, 0);
+	}
+	else if (key == 'd' || key == 'D') {
+    controll_mesh->move(0.05, 0);
+	}
+}
+
 void Application::keyboard_event(int key, int event, unsigned char mods) {
   switch (mode) {
     case RENDER_MODE:
@@ -466,6 +490,7 @@ void Application::keyboard_event(int key, int event, unsigned char mods) {
       break;
     case VISUALIZE_MODE:
       if (event == EVENT_PRESS) {
+				//std::cout << "Visualize mode " << (char)key << std::endl;
         switch(key) {
           case 'e': case 'E':
             to_edit_mode();
@@ -478,10 +503,23 @@ void Application::keyboard_event(int key, int event, unsigned char mods) {
           case ' ':
             reset_camera();
             break;
+					case 'W' : case 'S': case 'A': case 'D':
+						//std::cout << "Move object" << std::endl;
+						move_obj(key);
+						break;
           default:
             renderer->key_press(key);
         }
       }
+			else if (event == EVENT_REPEAT) {
+				switch (key) {
+				case 'W': case 'S': case 'A': case 'D':
+					move_obj(key);
+					break;
+				default:
+					break;
+				}
+			}
       break;
     case EDIT_MODE:
       if (event == EVENT_PRESS) {
@@ -589,8 +627,9 @@ void Application::mouse_released(e_mouse_button b) {
 */
 void Application::mouse1_dragged(float x, float y) {
   if (mode == RENDER_MODE) {
-    renderer->cell_br = Vector2D(x, screenH - y);
-    return;
+    //renderer->cell_br = Vector2D(x, screenH - y);
+    //return;
+		//std::cout << "Mouse1 dragged in render mode" << std::endl;
   }
   float dx = (x - mouseX);
   float dy = (y - mouseY);
@@ -600,6 +639,10 @@ void Application::mouse1_dragged(float x, float y) {
                           get_world_to_3DH());
   } else {
     camera.rotate_by(-dy * (PI / screenH), -dx * (PI / screenW));
+    if (mode == RENDER_MODE) {
+			renderer->stop();
+			renderer->start_raytracing();
+    }
   }
 }
 
@@ -607,7 +650,7 @@ void Application::mouse1_dragged(float x, float y) {
   When the mouse is dragged with the right button held down, translate.
 */
 void Application::mouse2_dragged(float x, float y) {
-  if (mode == RENDER_MODE) return;
+  //if (mode == RENDER_MODE) return;
   float dx = (x - mouseX);
   float dy = (y - mouseY);
 

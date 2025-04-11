@@ -25,6 +25,7 @@
 #include "scene/gl_scene/scene.h"
 #include "util/halfEdgeMesh.h"
 #include "application/meshEdit.h"
+#include "scene/gl_scene/mesh.h"
 
 // RaytracedRenderer
 #include "scene/scene.h"
@@ -133,6 +134,7 @@ private:
   void set_up_pathtracer();
 
   GLScene::Scene *scene;
+  GLScene::Mesh* controll_mesh;
   OfflineRenderer* renderer;
 
   // View Frustrum Variables.
@@ -211,6 +213,7 @@ private:
   void mouse1_dragged(float x, float y);  // Left Mouse Dragged.
   void mouse2_dragged(float x, float y);  // Right Mouse Dragged.
   void mouse_moved(float x, float y);     // Mouse Moved.
+	void move_obj(int key);               // Move object with keyboard.
 
   // OSD text manager //
   OSDText textManager;

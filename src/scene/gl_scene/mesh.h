@@ -73,6 +73,7 @@ class Mesh : public SceneObject, public MeshView {
   void upsample();
   void downsample();
   void resample();
+	void move(float dx, float dy);
 
  private:
 

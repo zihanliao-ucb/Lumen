@@ -322,7 +322,7 @@ void RaytracedRenderer::start_raytracing() {
 
   bvh->total_isects = 0; bvh->total_rays = 0;
   // launch threads
-  fprintf(stdout, "[PathTracer] Rendering... "); fflush(stdout);
+  //fprintf(stdout, "[PathTracer] Rendering... "); fflush(stdout);
   for (int i=0; i<numWorkerThreads; i++) {
       workerThreads[i] = new std::thread(&RaytracedRenderer::worker_thread, this);
   }
@@ -335,7 +335,7 @@ void RaytracedRenderer::render_to_file(string filename, size_t x, size_t y, size
     cv_done.wait(lk, [this]{ return state == DONE; });
     lk.unlock();
     save_image(filename);
-    fprintf(stdout, "[PathTracer] Job completed.\n");
+    //fprintf(stdout, "[PathTracer] Job completed.\n");
   } else {
     render_cell = true;
     cell_tl = Vector2D(x,y);
@@ -343,7 +343,7 @@ void RaytracedRenderer::render_to_file(string filename, size_t x, size_t y, size
     ImageBuffer buffer;
     raytrace_cell(buffer);
     save_image(filename, &buffer);
-    fprintf(stdout, "[PathTracer] Cell job completed.\n");
+    //fprintf(stdout, "[PathTracer] Cell job completed.\n");
   }
 }
 
@@ -351,7 +351,7 @@ void RaytracedRenderer::render_to_file(string filename, size_t x, size_t y, size
 void RaytracedRenderer::build_accel() {
 
   // collect primitives //
-  fprintf(stdout, "[PathTracer] Collecting primitives... "); fflush(stdout);
+  //fprintf(stdout, "[PathTracer] Collecting primitives... "); fflush(stdout);
   timer.start();
   vector<Primitive *> primitives;
   for (SceneObject *obj : scene->objects) {
@@ -363,7 +363,7 @@ void RaytracedRenderer::build_accel() {
   fprintf(stdout, "Done! (%.4f sec)\n", timer.duration());
 
   // build BVH //
-  fprintf(stdout, "[PathTracer] Building BVH from %lu primitives... ", primitives.size()); 
+  //fprintf(stdout, "[PathTracer] Building BVH from %lu primitives... ", primitives.size()); 
   fflush(stdout);
   timer.start();
   bvh = new BVHAccel(primitives);
@@ -663,24 +663,24 @@ void RaytracedRenderer::worker_thread() {
     { 
       lock_guard<std::mutex> lk(m_done);
       ++tilesDone;
-      cout << "\r[PathTracer] Rendering... " << int((double)tilesDone/tilesTotal * 100) << '%';
-      cout.flush();
+      //cout << "\r[PathTracer] Rendering... " << int((double)tilesDone/tilesTotal * 100) << '%';
+      //cout.flush();
     }
   }
 
   workerDoneCount++;
   if (!continueRaytracing && workerDoneCount == numWorkerThreads) {
     timer.stop();
-    fprintf(stdout, "\n[PathTracer] Rendering canceled!\n");
+    //fprintf(stdout, "\n[PathTracer] Rendering canceled!\n");
     state = READY;
   }
 
   if (continueRaytracing && workerDoneCount == numWorkerThreads) {
     timer.stop();
-    fprintf(stdout, "\r[PathTracer] Rendering... 100%%! (%.4fs)\n", timer.duration());
-    fprintf(stdout, "[PathTracer] BVH traced %llu rays.\n", bvh->total_rays);
-    fprintf(stdout, "[PathTracer] Average speed %.4f million rays per second.\n", (double)bvh->total_rays / timer.duration() * 1e-6);
-    fprintf(stdout, "[PathTracer] Averaged %f intersection tests per ray.\n", (((double)bvh->total_isects)/bvh->total_rays));
+    //fprintf(stdout, "\r[PathTracer] Rendering... 100%%! (%.4fs)\n", timer.duration());
+    //fprintf(stdout, "[PathTracer] BVH traced %llu rays.\n", bvh->total_rays);
+    //fprintf(stdout, "[PathTracer] Average speed %.4f million rays per second.\n", (double)bvh->total_rays / timer.duration() * 1e-6);
+    //fprintf(stdout, "[PathTracer] Averaged %f intersection tests per ray.\n", (((double)bvh->total_isects)/bvh->total_rays));
 
     lock_guard<std::mutex> lk(m_done);
     state = DONE;
