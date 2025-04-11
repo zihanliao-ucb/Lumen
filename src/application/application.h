@@ -25,7 +25,7 @@
 #include "scene/gl_scene/scene.h"
 #include "util/halfEdgeMesh.h"
 #include "application/meshEdit.h"
-#include "scene/gl_scene/mesh.h"
+#include "scene/gl_scene/mesh.h" 
 
 // RaytracedRenderer
 #include "scene/scene.h"

@@ -43,6 +43,7 @@ Mesh::Mesh(Collada::PolymeshInfo& polyMesh, const Matrix4x4& transform) {
 }
 
 void Mesh::move(float dx, float dy) {
+
 	for (VertexIter v = mesh.verticesBegin(); v != mesh.verticesEnd(); v++) {
 		v->position.x += dx;
 		v->position.y += dy;

@@ -432,6 +432,7 @@ void Application::mouse_event(int key, int event, unsigned char mods) {
 }
 
 void Application::move_obj(int key) {
+
 	if (key == 'w' || key == 'W') {
     controll_mesh->move(0, 0.05);
 	}
