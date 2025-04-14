@@ -46,6 +46,7 @@ Application::~Application() {
 
   delete renderer;
 
+	delete sdf_renderer;
 }
 
 void visual_debugger(GLScene::Scene** parent_scene, Application::Mode* current_mode);
@@ -157,11 +158,13 @@ void Application::render() {
 			scene->render_in_opengl();
       break;
     case RENDER_MODE:
-      renderer->update_screen();
+      //renderer->update_screen();
+      sdf_renderer->computeSDF();
+      sdf_renderer->render();
       break;
   }
 
-  debugger->render();
+  //debugger->render();
 }
 
 void Application::update_gl_camera() {
@@ -310,7 +313,7 @@ void Application::load(SceneInfo* sceneInfo) {
 
   // set default draw styles for meshEdit -
   scene->set_draw_styles(&defaultStyle, &hoverStyle, &selectStyle);
-
+	sdf_renderer = new SDFRenderer(&camera, scene);
 }
 
 void Application::init_camera(CameraInfo& cameraInfo,
@@ -396,6 +399,7 @@ void Application::scroll_event(float offset_x, float offset_y) {
       camera.move_forward(-offset_y * scroll_rate);
       break;
     case RENDER_MODE:
+      camera.move_forward(-offset_y * scroll_rate);
       break;
   }
 }
@@ -640,10 +644,6 @@ void Application::mouse1_dragged(float x, float y) {
                           get_world_to_3DH());
   } else {
     camera.rotate_by(-dy * (PI / screenH), -dx * (PI / screenW));
-    if (mode == RENDER_MODE) {
-			renderer->stop();
-			renderer->start_raytracing();
-    }
   }
 }
 

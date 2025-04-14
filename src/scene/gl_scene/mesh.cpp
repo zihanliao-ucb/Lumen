@@ -50,6 +50,33 @@ void Mesh::move(float dx, float dy) {
 	}
 }
 
+std::vector<std::pair<Vector3D, Vector3D>> Mesh::sample_points(double pixelArea) {
+  std::vector<std::pair<Vector3D, Vector3D>> points;
+	for (FaceIter f = mesh.facesBegin(); f != mesh.facesEnd(); f++) {
+    Vector3D normal = f->normal();
+		HalfedgeCIter h = f->halfedge();
+		Vector3D p0 = h->vertex()->position;
+		Vector3D p1 = h->next()->vertex()->position;
+		Vector3D p2 = h->next()->next()->vertex()->position;
+		// Calculate the area of the triangle
+		double area = 0.5 * cross(p1 - p0, p2 - p0).norm();
+		// Calculate the number of points to sample
+		int num_points = (int) std::ceil(area / pixelArea);
+		// Sample points uniformly within the triangle -> change to sample uniformly
+		for (int i = 0; i < num_points; i++) {
+			double u = rand() / (double)RAND_MAX;
+			double v = rand() / (double)RAND_MAX;
+			if (u + v > 1.0) {
+				u = 1.0 - u;
+				v = 1.0 - v;
+			}
+			Vector3D point = p0 + u * (p1 - p0) + v * (p2 - p0);
+      points.push_back({point, normal});
+		}
+	}
+	return points;
+}
+
 void Mesh::render_in_opengl() const {
 
   // TODO: fix drawing with BSDF

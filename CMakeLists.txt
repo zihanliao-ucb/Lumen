@@ -84,6 +84,8 @@ set(APPLICATION_3_2_SOURCE
     src/imgui/imgui_tables.cpp
     src/imgui/backends/imgui_impl_glfw.cpp
     src/imgui/backends/imgui_impl_opengl2.cpp
+    # sdf
+    src/sdf/sdf.cpp
 )
 
 set(APPLICATION_HEADERS
@@ -140,7 +142,8 @@ set(APPLICATION_HEADERS
     src/application/application.h
     src/application/meshEdit.h
     src/application/renderer.h
-)
+    # sdf
+    src/sdf/sdf.h)
 
 if (WIN32)
     list(APPEND APPLICATION_3_1_SOURCE src/util/win32/getopt.c)

@@ -44,6 +44,8 @@ public:
    */
   virtual void render_in_opengl() const = 0;
 
+  virtual std::vector<std::pair<Vector3D, Vector3D>> sample_points(double pixelArea) = 0;
+
   virtual void render_debugger_node() { };
 
   /**

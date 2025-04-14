@@ -1,0 +1,105 @@
+#version 430
+
+layout (local_size_x = 8, local_size_y = 8) in;
+
+layout (binding = 0) uniform sampler3D sdfTexture;
+layout (rgba32f, binding = 1) uniform image2D screenImage;
+
+uniform vec3 uBoundingBoxOrigin;
+uniform float uVoxelSize;
+uniform int uSdfSize;
+
+uniform vec3 uCameraPos;
+uniform mat3 uC2WMatrix; // camera to world matrix
+
+uniform int uScreenW;
+uniform int uScreenH;
+uniform float uTanFovY;
+uniform float uAspect;
+
+float sampleSDF(vec3 p_world) {
+    vec3 p_grid = (p_world - uBoundingBoxOrigin) / (uVoxelSize * float(uSdfSize));
+    if (any(lessThan(p_grid, vec3(0.0))) || any(greaterThanEqual(p_grid, vec3(1.0))))
+        return 100.0;
+
+    return texture(sdfTexture, p_grid).w;
+}
+
+float hitBoundingBox(vec3 origin, vec3 dir, out vec3 new_origin, out float tend) {
+    vec3 boxMin = uBoundingBoxOrigin;
+    vec3 boxMax = uBoundingBoxOrigin + vec3(uSdfSize) * uVoxelSize;
+
+    vec3 invDir = 1.0 / dir;
+    vec3 t0s = (boxMin - origin) * invDir;
+    vec3 t1s = (boxMax - origin) * invDir;
+
+    vec3 tsmaller = min(t0s, t1s);
+    vec3 tbigger = max(t0s, t1s);
+
+    float tNear = max(max(tsmaller.x, tsmaller.y), tsmaller.z);
+    float tFar = min(min(tbigger.x, tbigger.y), tbigger.z);
+
+    if (tNear <= 0.0 && tFar >= 0.0) {
+        // Ray starts inside the box
+        new_origin = origin;
+        tend = tFar;
+        return tFar;
+    }
+
+    if (tNear <= tFar && tNear >= 0.0) {
+        // Ray enters the box from outside
+        new_origin = origin + dir * (tNear + 0.0001);
+        tend = tFar - tNear;
+        return tNear;
+    }
+
+    return -1.0; // No intersection
+}
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    if (pix.x >= uScreenW || pix.y >= uScreenH) return;
+
+    float totalDist = 0.0;
+    int maxSteps = 128;
+    float threshold = uVoxelSize / 2.0;
+
+    for (int i = 0; i < 64; ++i) {
+        vec2 jitter = vec2(i % 10, i / 10) / 10.0 - 0.5;
+
+        vec2 screenUV = (vec2(pix) + 0.5 + jitter) / vec2(uScreenW, uScreenH);
+        vec2 ndc = screenUV * 2.0 - 1.0;
+
+        vec3 rayo = uC2WMatrix * vec3(ndc.x * uAspect * uTanFovY, ndc.y * uTanFovY, -1.0);
+        vec3 rayd = normalize(rayo);
+        rayo = uCameraPos + rayo;
+
+        vec3 new_origin;
+        float tend = 100.0; // far plane distance
+        float intersect_t = hitBoundingBox(rayo, rayd, new_origin, tend);
+        if (intersect_t < 0.0) {
+            totalDist += 5.0; // No intersection, add a large value
+            continue;
+        }
+
+        float t = 0.0;
+        int last_sign = sampleSDF(new_origin) > 0.0 ? 1 : -1; // inside or outside
+        for (int step = 0; step < maxSteps; ++step) {
+            vec3 p = new_origin + t * rayd;
+            float d = sampleSDF(p);
+            if (abs(d) < threshold) {
+                totalDist += t;
+                break;
+            }
+            if (t > tend) {
+                totalDist += 10.0; // No intersection, add a large value
+                break;
+            }
+
+            t += abs(d);
+        }
+    }
+
+    float avgDist = totalDist / 100.0;
+    imageStore(screenImage, pix, vec4(avgDist / 10.0));
+}

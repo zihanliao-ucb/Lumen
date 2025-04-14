@@ -72,6 +72,16 @@ class Camera {
   double aspect_ratio() const { return ar; }
   double near_clip() const { return nClip; }
   double far_clip() const { return fClip; }
+	std::pair<double, double> pixel_length() const {
+    double viewPlaneHeight = 2.0 * tan(0.5 * radians(vFov)) * screenDist;
+    double viewPlaneWidth = viewPlaneHeight * ar;
+		double pixelWidth = viewPlaneWidth / screenW;
+		double pixelHeight = viewPlaneHeight / screenH;
+		return std::make_pair(pixelWidth, pixelHeight);
+	}
+  int screen_size() const { return (int) std::max(screenW, screenH); };
+	size_t screen_width() const { return screenW; }
+	size_t screen_height() const { return screenH; }
 
   virtual void dump_settings(std::string filename);
   virtual void load_settings(std::string filename);

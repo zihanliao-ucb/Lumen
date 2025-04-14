@@ -2,6 +2,7 @@
 #define CGL_GLSCENE_SPHERE_H
 
 #include "scene.h"
+#include "corecrt_math_defines.h"
 
 #include "../collada/sphere_info.h"
 
@@ -18,6 +19,7 @@ class Sphere : public SceneObject {
   void render_in_opengl() const;
 
   void render_debugger_node();
+	std::vector<std::pair<Vector3D, Vector3D>> sample_points(double pixelArea);
 
   BBox get_bbox();
 

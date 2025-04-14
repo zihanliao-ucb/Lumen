@@ -35,6 +35,8 @@
 // Shared modules
 #include "pathtracer/camera.h"
 
+#include "sdf/sdf.h"
+
 using namespace std;
 
 namespace CGL {
@@ -136,6 +138,8 @@ private:
   GLScene::Scene *scene;
   GLScene::Mesh* controll_mesh;
   OfflineRenderer* renderer;
+	SDFRenderer* sdf_renderer;
+
 
   // View Frustrum Variables.
   // On resize, the aspect ratio is changed. On reset_camera, the position and
