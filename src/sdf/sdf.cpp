@@ -3,10 +3,10 @@
 
 using namespace CGL;
 
-SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene)
-  : camera(camera), scene(scene), surfacePoints(0), sdfTexture(0), seedShader(0), jfaShader(0) {
+SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* control_mesh)
+  : camera(camera), scene(scene), control_mesh(control_mesh), surfacePoints(0), sdfTexture(0), seedShader(0), jfaShader(0) {
 
-  sdfSize = 256;
+  sdfSize = 128;
 	std::cout << "SDF size: " << sdfSize << std::endl;
 
   glGenTextures(1, &sdfTexture);
@@ -40,6 +40,25 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene)
   std::vector<float> sdfInitNormal(numVoxels * 4, 0.0f);
   glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, sdfSize, sdfSize, sdfSize, 0,
     GL_RGBA, GL_FLOAT, sdfInitNormal.data());
+
+	// Compile diverge shader
+	divergeShader = glCreateProgram();
+	GLuint divergeCS = glCreateShader(GL_COMPUTE_SHADER);
+	std::ifstream file3("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/jfa_diverge.comp");
+	std::string code3((std::istreambuf_iterator<char>(file3)), std::istreambuf_iterator<char>());
+	const char* src3 = code3.c_str();
+	glShaderSource(divergeCS, 1, &src3, NULL);
+	glCompileShader(divergeCS);
+  glAttachShader(divergeShader, divergeCS);
+  glLinkProgram(divergeShader);
+	GLint success3 = 0;
+  glGetProgramiv(divergeShader, GL_LINK_STATUS, &success3);
+	if (!success3) {
+		char infoLog[512];
+		glGetShaderInfoLog(divergeShader, 512, NULL, infoLog);
+		std::cerr << "Diverge shader linking failed:\n" << infoLog << std::endl;
+	}
+	glDeleteShader(divergeCS);
 
   // Compile seed shader
   seedShader = glCreateProgram();
@@ -97,6 +116,14 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene)
   std::vector<std::pair<Vector3D, Vector3D>> surface_pts;
   for (GLScene::SceneObject* obj : scene->objects) {
     std::vector<std::pair<Vector3D, Vector3D>> pts = obj->sample_points(pixelArea);
+    // If the obj is the control_mesh
+    if (static_cast<GLScene::Mesh*>(obj) == control_mesh) {
+			control_pts_offset = surface_pts.size();
+			control_pts_size = pts.size();
+			std::cout << "Control mesh found, "
+				<< "control_pts_offset: " << control_pts_offset
+				<< ", control_pts_size: " << control_pts_size << std::endl;
+    }
     surface_pts.insert(surface_pts.end(), pts.begin(), pts.end());
   }
 	numSurfacePts = surface_pts.size();
@@ -166,6 +193,25 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene)
   glDeleteShader(vs);
   glDeleteShader(fs);
 
+  // Comile control_mesh translation shader
+	translationShader = glCreateProgram();
+	GLuint translationCS = glCreateShader(GL_COMPUTE_SHADER);
+	std::ifstream translationFile("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/translation.comp");
+	std::string translationCode((std::istreambuf_iterator<char>(translationFile)), std::istreambuf_iterator<char>());
+	const char* translationSrc = translationCode.c_str();
+	glShaderSource(translationCS, 1, &translationSrc, NULL);
+	glCompileShader(translationCS);
+	glAttachShader(translationShader, translationCS);
+	glLinkProgram(translationShader);
+	GLint translationLinked = 0;
+	glGetProgramiv(translationShader, GL_LINK_STATUS, &translationLinked);
+	if (!translationLinked) {
+		char infoLog[512];
+		glGetProgramInfoLog(translationShader, 512, NULL, infoLog);
+		std::cerr << "Translation shader linking failed:\n" << infoLog << std::endl;
+	}
+	glDeleteShader(translationCS);
+
 	// Create fullscreen quad
   glGenVertexArrays(1, &quadVAO);
   glGenVertexArrays(1, &quadVAO);
@@ -190,6 +236,27 @@ void SDFRenderer::setCamera(Camera* cam) {
 
 void SDFRenderer::setScene(GLScene::Scene* sc) {
   scene = sc;
+}
+
+void SDFRenderer::moveControlMesh(Vector3D delta) {
+	// Move control mesh points
+	glUseProgram(translationShader);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, surfacePoints);
+	glUniform1i(glGetUniformLocation(translationShader, "uOffset"), control_pts_offset);
+	glUniform1i(glGetUniformLocation(translationShader, "uSize"), control_pts_size);
+  glUniform3f(glGetUniformLocation(translationShader, "uDelta"),
+    static_cast<float>(delta.x),
+    static_cast<float>(delta.y),
+    static_cast<float>(delta.z));
+	glDispatchCompute(numSurfacePts / 64 + 1, 1, 1);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+  // Add all sdf value by sdfVoxelLength / 2
+  glUseProgram(divergeShader);
+  glBindImageTexture(0, sdfTexture, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA32F);
+  glUniform1f(glGetUniformLocation(divergeShader, "uVoxelSize"), static_cast<float>(sdfVoxelLength));
+  glUniform1i(glGetUniformLocation(divergeShader, "uSdfSize"), sdfSize);
+  glDispatchCompute(sdfSize / 8, sdfSize / 8, sdfSize / 8);
+  glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 }
 
 void SDFRenderer::computeSDF() {
@@ -222,6 +289,8 @@ void SDFRenderer::computeSDF() {
   glUniform1i(glGetUniformLocation(jfaShader, "uSdfSize"), sdfSize);
   glDispatchCompute(sdfSize / 8, sdfSize / 8, sdfSize / 8);
   glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+	//std::cout << "SDF computed" << std::endl;
 
 	// Plot SDF points
  // std::vector<float> sdfCPU(sdfSize * sdfSize * sdfSize * 4);

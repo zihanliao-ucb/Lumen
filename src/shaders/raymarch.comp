@@ -17,12 +17,12 @@ uniform int uScreenH;
 uniform float uTanFovY;
 uniform float uAspect;
 
-float sampleSDF(vec3 p_world) {
+vec4 sampleSDF(vec3 p_world) {
     vec3 p_grid = (p_world - uBoundingBoxOrigin) / (uVoxelSize * float(uSdfSize));
     if (any(lessThan(p_grid, vec3(0.0))) || any(greaterThanEqual(p_grid, vec3(1.0))))
-        return 100.0;
+        return vec4(0.0, 0.0, 0.0, 100.0);
 
-    return texture(sdfTexture, p_grid).w;
+    return texture(sdfTexture, p_grid);
 }
 
 float hitBoundingBox(vec3 origin, vec3 dir, out vec3 new_origin, out float tend) {
@@ -48,7 +48,7 @@ float hitBoundingBox(vec3 origin, vec3 dir, out vec3 new_origin, out float tend)
 
     if (tNear <= tFar && tNear >= 0.0) {
         // Ray enters the box from outside
-        new_origin = origin + dir * (tNear + 0.0001);
+        new_origin = origin + dir * (tNear + 0.00001);
         tend = tFar - tNear;
         return tNear;
     }
@@ -63,6 +63,7 @@ void main() {
     float totalDist = 0.0;
     int maxSteps = 128;
     float threshold = uVoxelSize / 2.0;
+    vec3 normal = vec3(0.0);
 
     for (int i = 0; i < 64; ++i) {
         vec2 jitter = vec2(i % 10, i / 10) / 10.0 - 0.5;
@@ -83,12 +84,13 @@ void main() {
         }
 
         float t = 0.0;
-        int last_sign = sampleSDF(new_origin) > 0.0 ? 1 : -1; // inside or outside
         for (int step = 0; step < maxSteps; ++step) {
             vec3 p = new_origin + t * rayd;
-            float d = sampleSDF(p);
+            vec4 sdf = sampleSDF(p);
+            float d = sdf.w;
             if (abs(d) < threshold) {
                 totalDist += t;
+                normal = normalize(sdf.xyz);
                 break;
             }
             if (t > tend) {
@@ -101,5 +103,6 @@ void main() {
     }
 
     float avgDist = totalDist / 100.0;
-    imageStore(screenImage, pix, vec4(avgDist / 10.0));
+    // imageStore(screenImage, pix, vec4(avgDist / 10.0));
+    imageStore(screenImage, pix, vec4(normal, 1.0));
 }

@@ -36,10 +36,12 @@ void main() {
         for (int dz = -1; dz <= 1; dz++) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue; // skip the current voxel
                     ivec3 offset = ivec3(dx, dy, dz) * jump;
                     ivec3 neighbor = coord + offset;
                     vec4 neighborSDF = readSDF(neighbor);
                     float d = length(p_grid - neighborSDF.xyz);
+                    // float d = length(vec3(offset)) * uVoxelSize + neighborSDF.a;
                     if (d < minDist) {
                         minPoint = neighborSDF.xyz;
                         minDist = d;
@@ -49,7 +51,7 @@ void main() {
             }
         }
         // if dot product is negative, we are inside the surface
-        if (dot(minNormal.xyz, minPoint - p_grid) < 0.0) {
+        if (dot(minNormal.xyz, p_grid - minPoint) < 0.0) {
             minDist = -minDist;
         }
         imageStore(sdfTexture, coord, vec4(minPoint, minDist));

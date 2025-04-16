@@ -1,0 +1,19 @@
+#version 430
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) buffer SurfacePoints {
+  vec4 points[];
+};
+
+uniform int uOffset;
+uniform int uSize;
+uniform vec3 uDelta;
+
+void main() {
+  uint gid = gl_GlobalInvocationID.x;
+  if (gid >= uint(uSize)) return;
+
+  uint index = uint(uOffset) + gid;
+  points[index].xyz += uDelta;
+}

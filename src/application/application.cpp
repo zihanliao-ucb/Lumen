@@ -313,7 +313,7 @@ void Application::load(SceneInfo* sceneInfo) {
 
   // set default draw styles for meshEdit -
   scene->set_draw_styles(&defaultStyle, &hoverStyle, &selectStyle);
-	sdf_renderer = new SDFRenderer(&camera, scene);
+	sdf_renderer = new SDFRenderer(&camera, scene, controll_mesh);
 }
 
 void Application::init_camera(CameraInfo& cameraInfo,
@@ -438,59 +438,64 @@ void Application::mouse_event(int key, int event, unsigned char mods) {
 void Application::move_obj(int key) {
 
 	if (key == 'w' || key == 'W') {
-    controll_mesh->move(0, 0.05);
+    //controll_mesh->move(0, 0.05);
+		sdf_renderer->moveControlMesh(Vector3D(0, 0.05, 0));
 	}
 	else if (key == 's' || key == 'S') {
-    controll_mesh->move(0, -0.05);
+    //controll_mesh->move(0, -0.05);
+		sdf_renderer->moveControlMesh(Vector3D(0, -0.05, 0));
 	}
 	else if (key == 'a' || key == 'A') {
-    controll_mesh->move(-0.05, 0);
+    //controll_mesh->move(-0.05, 0);
+		sdf_renderer->moveControlMesh(Vector3D(-0.05, 0, 0));
 	}
 	else if (key == 'd' || key == 'D') {
-    controll_mesh->move(0.05, 0);
+    //controll_mesh->move(0.05, 0);
+		sdf_renderer->moveControlMesh(Vector3D(0.05, 0, 0));
 	}
 }
 
 void Application::keyboard_event(int key, int event, unsigned char mods) {
   switch (mode) {
     case RENDER_MODE:
-      if (event == EVENT_PRESS) {
-        switch (key) {
-          case 'e': case 'E':
-            to_edit_mode();
-            break;
-          case 'v': case 'V':
-            renderer->stop();
-            renderer->start_visualizing();
-            mode = VISUALIZE_MODE;
-            break;
-          case 's': case 'S':
-            renderer->save_image();
-            break;
-          case '[': case ']':
-          case '+': case '=':
-          case '-': case '_':
-          case '.': case '>':
-          case ',': case '<':
-          case 'h': case 'H':
-          case 'k': case 'K':
-          case 'l': case 'L':
-          case ';': case '\'':
-            renderer->stop();
-            renderer->key_press(key);
-            renderer->start_raytracing();
-            break;
-          case 'C': 
-            renderer->key_press(key);
-            break;
-          case 'r': case 'R':
-            renderer->stop();
-            renderer->start_raytracing();
-            break;
-          case 'd': case 'D':
-            camera.dump_settings(filename + "_cam_settings.txt");
-            break;
-        }
+      if (event == EVENT_PRESS || event == EVENT_REPEAT) {
+				move_obj(key);
+        //switch (key) {
+        //  case 'e': case 'E':
+        //    to_edit_mode();
+        //    break;
+        //  case 'v': case 'V':
+        //    renderer->stop();
+        //    renderer->start_visualizing();
+        //    mode = VISUALIZE_MODE;
+        //    break;
+        //  case 's': case 'S':
+        //    renderer->save_image();
+        //    break;
+        //  case '[': case ']':
+        //  case '+': case '=':
+        //  case '-': case '_':
+        //  case '.': case '>':
+        //  case ',': case '<':
+        //  case 'h': case 'H':
+        //  case 'k': case 'K':
+        //  case 'l': case 'L':
+        //  case ';': case '\'':
+        //    renderer->stop();
+        //    renderer->key_press(key);
+        //    renderer->start_raytracing();
+        //    break;
+        //  case 'C': 
+        //    renderer->key_press(key);
+        //    break;
+        //  case 'r': case 'R':
+        //    renderer->stop();
+        //    renderer->start_raytracing();
+        //    break;
+        //  case 'd': case 'D':
+        //    camera.dump_settings(filename + "_cam_settings.txt");
+        //    break;
+        //}
       }
       break;
     case VISUALIZE_MODE:
