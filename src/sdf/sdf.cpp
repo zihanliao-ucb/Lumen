@@ -41,22 +41,21 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 		for (int i = 0; i < nm.nCards; ++i) {
 			auto& card = nm.nanite_cards[i];
 			card.bias += cardArrayBias;
-			cardSizeArray.push_back(card.sx);
-			cardSizeArray.push_back(card.sy);
-			cardSizeArray.push_back(card.sz);
+			cardSizeArray.insert(cardSizeArray.end(), card.size.data(), card.size.data() + 3);
 			cardSizeArray.push_back(card.bias);
 
-			cardCoordArray.push_back(card.box.origin.x());
-			cardCoordArray.push_back(card.box.origin.y());
-			cardCoordArray.push_back(card.box.origin.z());
-			for (int j = 0; j < 9; ++j) {
-				cardCoordArray.push_back(card.mat[j]);
-			}
+			cardCoordArray.insert(cardCoordArray.end(), card.box.origin.data(), card.box.origin.data() + 3);
+			Eigen::Matrix3f M = card.getTransform();
+			cardCoordArray.insert(cardCoordArray.end(), M.data(), M.data() + 9);
 
-			cardNormalArray.insert(cardNormalArray.end(), card.normals.begin(), card.normals.end());
+			std::vector<float> cardNormalData = card.getNormalData();
+			cardNormalArray.insert(cardNormalArray.end(), cardNormalData.begin(), cardNormalData.end());
 		}
 		cardArrayBias += nm.nCardsVoxels;
   }
+
+	std::cout << "Total card size: " << cardArrayBias << std::endl;
+	std::cout << "Screen size: " << camera->screen_width() * camera->screen_height() << std::endl;
 
 	// Create the sdf size array
 	glGenBuffers(1, &sdfSizeArray_g);

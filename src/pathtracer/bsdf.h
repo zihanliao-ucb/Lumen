@@ -134,8 +134,6 @@ class DiffuseBSDF : public BSDF {
   bool is_delta() const { return false; }
 
   void render_debugger_node();
-
-private:
   /*
    * Reflectance is also commonly called the "albedo" of a surface,
    * which ranges from [0,1] in RGB, representing a range of

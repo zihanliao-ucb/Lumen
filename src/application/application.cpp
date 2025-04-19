@@ -366,6 +366,7 @@ GLScene::SceneObject *Application::init_sphere(
 
 GLScene::SceneObject *Application::init_polymesh(
     PolymeshInfo& polymesh, const Matrix4x4& transform) {
+	std::cout << "Emission: " << polymesh.material->bsdf->get_emission() << " Reflectance: " << polymesh.material->bsdf->f(Vector3D(), Vector3D()) << std::endl;
   return new GLScene::Mesh(polymesh, transform);
 }
 

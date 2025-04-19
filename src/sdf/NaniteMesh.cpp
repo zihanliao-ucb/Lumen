@@ -15,7 +15,8 @@ namespace CGL {
 		}
 		// Get the cards
 		splitOBBs(cards, vertices, 12);
-		computeCards(0.001f);
+		initCards(0.001f);
+		sampleComputeCards(0.001f);
 	}
 
 	NaniteMesh::~NaniteMesh() {
@@ -23,6 +24,7 @@ namespace CGL {
 		sdf.clear();
 		normals.clear();
 		seedPoints.clear();
+		nanite_cards.clear();
 	}
 
 	void NaniteMesh::setShader(GLuint sdfarr, GLuint normalarr, GLuint seedarr, GLuint shader) {
@@ -191,56 +193,134 @@ namespace CGL {
 			maxP = maxP.cwiseMax(local);
 		}
 
-		Eigen::Vector3f extent = maxP - minP;
-		Eigen::Vector3f origin = mean + basis * minP;
+		Eigen::Vector3f padding(0.01f, 0.01f, 0.01f);
+		Eigen::Vector3f extent = (maxP - minP) + 2.0f * padding;
+		Eigen::Vector3f origin = mean + basis * (minP - padding);
 
 		return OBB{ origin, basis, extent, points };
 	}
 
+	//void NaniteMesh::splitOBBs(std::vector<OBB>& result, const std::vector<Eigen::Vector3f>& points, int maxBoxes) {
+	//	std::priority_queue<OBB, std::vector<OBB>> queue;
+	//	queue.push(computeOBB(points));
+
+	//	while (!queue.empty() && result.size() + queue.size() < maxBoxes) {
+	//		OBB current = queue.top(); queue.pop();
+	//		if (current.points.size() <= 4) {
+	//			current.extent = current.extent.cwiseMax(Eigen::Vector3f(0.01f, 0.01f, 0.01f));
+	//			result.push_back(current);
+	//			continue;
+	//		}
+
+	//		Eigen::Vector3f axis = current.rotation.col(2); // splitting along PCA axis
+
+	//		std::vector<std::pair<float, Eigen::Vector3f>> projections;
+	//		for (const auto& p : current.points) {
+	//			float t = (p - current.origin).dot(axis);
+	//			projections.emplace_back(t, p);
+	//		}
+
+	//		std::sort(projections.begin(), projections.end(),
+	//			[](const std::pair<float, Eigen::Vector3f>& a, const std::pair<float, Eigen::Vector3f>& b) {
+	//				return a.first < b.first;
+	//			});
+
+	//		int mid = projections.size() / 2;
+	//		std::vector<Eigen::Vector3f> left, right;
+	//		for (size_t i = 0; i < projections.size(); ++i) {
+	//			if (i < mid) left.push_back(projections[i].second);
+	//			else right.push_back(projections[i].second);
+	//		}
+
+	//		if (!left.empty()) queue.push(computeOBB(left));
+	//		if (!right.empty()) queue.push(computeOBB(right));
+	//	}
+
+	//	while (!queue.empty()) {
+	//		OBB final = queue.top(); queue.pop();
+	//		final.extent = final.extent.cwiseMax(Eigen::Vector3f(0.01f, 0.01f, 0.01f));
+	//		result.push_back(final);
+	//	}
+	//}
+
 	void NaniteMesh::splitOBBs(std::vector<OBB>& result, const std::vector<Eigen::Vector3f>& points, int maxBoxes) {
-		std::priority_queue<OBB, std::vector<OBB>> queue;
-		queue.push(computeOBB(points));
+		if (points.empty() || maxBoxes <= 0) return;
 
-		while (!queue.empty() && result.size() + queue.size() < maxBoxes) {
-			OBB current = queue.top(); queue.pop();
-			if (current.points.size() <= 4) {
-				current.extent = current.extent.cwiseMax(Eigen::Vector3f(0.01f, 0.01f, 0.01f));
-				result.push_back(current);
-				continue;
-			}
+		const int maxIters = 20;
+		const float tolerance = 1e-4f;
+		const int N = points.size();
+		const int K = std::min(maxBoxes, N);
 
-			Eigen::Vector3f axis = current.rotation.col(2); // splitting along PCA axis
-
-			std::vector<std::pair<float, Eigen::Vector3f>> projections;
-			for (const auto& p : current.points) {
-				float t = (p - current.origin).dot(axis);
-				projections.emplace_back(t, p);
-			}
-
-			std::sort(projections.begin(), projections.end(),
-				[](const std::pair<float, Eigen::Vector3f>& a, const std::pair<float, Eigen::Vector3f>& b) {
-					return a.first < b.first;
-				});
-
-			int mid = projections.size() / 2;
-			std::vector<Eigen::Vector3f> left, right;
-			for (size_t i = 0; i < projections.size(); ++i) {
-				if (i < mid) left.push_back(projections[i].second);
-				else right.push_back(projections[i].second);
-			}
-
-			if (!left.empty()) queue.push(computeOBB(left));
-			if (!right.empty()) queue.push(computeOBB(right));
+		if (N <= 4) {
+			OBB obb = computeOBB(points);
+			obb.extent = obb.extent.cwiseMax(Eigen::Vector3f(0.01f, 0.01f, 0.01f));
+			result.push_back(obb);
+			return;
 		}
 
-		while (!queue.empty()) {
-			OBB final = queue.top(); queue.pop();
-			final.extent = final.extent.cwiseMax(Eigen::Vector3f(0.01f, 0.01f, 0.01f));
-			result.push_back(final);
+		// --- Initialize K centroids randomly ---
+		std::vector<Eigen::Vector3f> centroids;
+		std::default_random_engine rng;
+		std::uniform_int_distribution<int> dist(0, N - 1);
+		std::unordered_set<int> chosen;
+		while (centroids.size() < K) {
+			int idx = dist(rng);
+			if (chosen.insert(idx).second)
+				centroids.push_back(points[idx]);
+		}
+
+		std::vector<int> assignments(N, 0);
+		bool converged = false;
+
+		for (int iter = 0; iter < maxIters && !converged; ++iter) {
+			converged = true;
+
+			// --- Assign points to nearest centroid ---
+			for (int i = 0; i < N; ++i) {
+				float bestDist = std::numeric_limits<float>::max();
+				int bestIdx = 0;
+				for (int k = 0; k < K; ++k) {
+					float d = (points[i] - centroids[k]).squaredNorm();
+					if (d < bestDist) {
+						bestDist = d;
+						bestIdx = k;
+					}
+				}
+				if (assignments[i] != bestIdx) {
+					assignments[i] = bestIdx;
+					converged = false;
+				}
+			}
+
+			// --- Update centroids ---
+			std::vector<Eigen::Vector3f> newCentroids(K, Eigen::Vector3f::Zero());
+			std::vector<int> counts(K, 0);
+			for (int i = 0; i < N; ++i) {
+				newCentroids[assignments[i]] += points[i];
+				counts[assignments[i]]++;
+			}
+
+			for (int k = 0; k < K; ++k) {
+				if (counts[k] > 0)
+					centroids[k] = newCentroids[k] / static_cast<float>(counts[k]);
+			}
+		}
+
+		// --- Group points and compute OBBs ---
+		std::vector<std::vector<Eigen::Vector3f>> clusters(K);
+		for (int i = 0; i < N; ++i)
+			clusters[assignments[i]].push_back(points[i]);
+
+		for (int k = 0; k < K; ++k) {
+			if (!clusters[k].empty()) {
+				OBB obb = computeOBB(clusters[k]);
+				obb.extent = obb.extent.cwiseMax(Eigen::Vector3f(0.01f, 0.01f, 0.01f));
+				result.push_back(obb);
+			}
 		}
 	}
 
-	void NaniteMesh::computeCards(float area) {
+	void NaniteMesh::initCards(float area) {
 		// Compute the card size and the transformation matrix
 		float nominalSize = std::sqrt(area);
 		int bias = 0;
@@ -248,72 +328,34 @@ namespace CGL {
 			const OBB& obb = cards[i];
 			NaniteCard card;
 			card.box = obb;
-			card.sx = std::min(std::max(static_cast<int>(std::ceil(obb.extent.x() / nominalSize)), 1), 128);
-			card.sy = std::min(std::max(static_cast<int>(std::ceil(obb.extent.y() / nominalSize)), 1), 128);
-			card.sz = std::min(std::max(static_cast<int>(std::ceil(obb.extent.z() / nominalSize)), 1), 128);
-			card.vx = std::max(obb.extent.x() / card.sx, 0.01f);
-			card.vy = std::max(obb.extent.y() / card.sy, 0.01f);
-			card.vz = std::max(obb.extent.z() / card.sz, 0.01f);
-			Eigen::Matrix3f scale;
-			scale << 1.0f / card.vx, 0, 0,
-				0, 1.0f / card.vy, 0,
-				0, 0, 1.0f / card.vz;
-			Eigen::Matrix3f transform = scale * card.box.rotation.transpose();
-			for (int col = 0; col < 3; ++col) {
-				for (int row = 0; row < 3; ++row) {
-					card.mat[col * 3 + row] = transform(row, col);
-					//card.mat[row * 3 + col] = transform(row, col);
-				}
-			}
+			card.setSize(nominalSize);
 
-			Eigen::Vector3f test = card.box.origin + card.box.rotation * (card.box.extent * 0.1f);
-			Eigen::Vector3f local = transform * (test - card.box.origin);
-			std::cout << "Mapped to voxel space: " << local.transpose() << std::endl;
-			std::cout << "Card size: " << card.sx << " " << card.sy << " " << card.sz << std::endl;
+			std::cout << "Card " << i << ": " << card.box.extent.transpose() << std::endl;
+			std::cout << "Card size: " << card.size.transpose() << std::endl;
 
-			card.normals.resize(card.sx * card.sy * card.sz * 3, 0.0f);
+			card.resetData();
 			card.bias = bias;
 			nanite_cards.push_back(card);
-			bias += card.sx * card.sy * card.sz;
+			bias += card.size.prod();
 		}
 		nCards = nanite_cards.size();
 		nCardsVoxels = bias;
 
+		std::cout << "Storage Ratio: " << static_cast<float>(nCardsVoxels) / (sx * sy * sz) << std::endl;
+	}
+
+	void NaniteMesh::sampleComputeCards(float area) {
 		// Compute the normals for cards
-		std::vector<std::pair<Vector3D, Vector3D>> points = mesh->sample_points(area);
+		std::vector<std::pair<Vector3D, Vector3D>> points = mesh->sample_points(0.00001);
 		for (std::pair<Vector3D, Vector3D>& point : points) {
-			Eigen::Vector3f p(
-				static_cast<float>(point.first.x),
-				static_cast<float>(point.first.y),
-				static_cast<float>(point.first.z)
-			);
-			Eigen::Vector3f normal(
-				static_cast<float>(point.second.x),
-				static_cast<float>(point.second.y),
-				static_cast<float>(point.second.z)
-			);
+			Eigen::Vector3f p = Vector3f_fromCGL(point.first);
+			Eigen::Vector3f normal = Vector3f_fromCGL(point.second);
 
 			for (int i = 0; i < nanite_cards.size(); ++i) {
 				NaniteCard& card = nanite_cards[i];
-				Eigen::Vector3f offset = p - card.box.origin;
-
-				// Reconstruct column-major matrix from card.mat[]
-				Eigen::Matrix3f M;
-				M << card.mat[0], card.mat[3], card.mat[6],
-					card.mat[1], card.mat[4], card.mat[7],
-					card.mat[2], card.mat[5], card.mat[8];
-
-				Eigen::Vector3f local = M * offset;
-				Eigen::Vector3i idx = local.array().floor().cast<int>();
-
-				if ((idx.array() >= 0).all() &&
-					(idx.array() < Eigen::Vector3i(card.sx, card.sy, card.sz).array()).all()) {
-					int index = idx.x() + idx.y() * card.sx + idx.z() * card.sx * card.sy;
-					card.normals[index * 3 + 0] = normal.x();
-					card.normals[index * 3 + 1] = normal.y();
-					card.normals[index * 3 + 2] = normal.z();
-				}
+				card.inflate(p, normal);
 			}
 		}
 	}
+
 };
