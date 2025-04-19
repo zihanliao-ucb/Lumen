@@ -4,159 +4,110 @@
 using namespace CGL;
 
 SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* control_mesh)
-  : camera(camera), scene(scene), control_mesh(control_mesh), surfacePoints(0), sdfTexture(0), seedShader(0), jfaShader(0) {
+  : camera(camera), scene(scene), control_mesh(control_mesh) {
 
-  sdfSize = 128;
-	std::cout << "SDF size: " << sdfSize << std::endl;
-
-  glGenTextures(1, &sdfTexture);
-  glBindTexture(GL_TEXTURE_3D, sdfTexture);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-
-  double sdfLength = scene->get_bbox().max.x - scene->get_bbox().min.x;
-  sdfLength = std::max(sdfLength, scene->get_bbox().max.y - scene->get_bbox().min.y);
-  sdfLength = std::max(sdfLength, scene->get_bbox().max.z - scene->get_bbox().min.z);
-  bbox_min = scene->get_bbox().min - 0.05 * sdfLength;
-	sdfLength *= 1.1; // add some padding
-  sdfVoxelLength = sdfLength / sdfSize;
-	std::cout << "SDF voxel length: " << sdfVoxelLength << std::endl;
-
-  int numVoxels = sdfSize * sdfSize * sdfSize;
-  std::vector<float> sdfInitsSDF(numVoxels * 4, 5.0f);
-  glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, sdfSize, sdfSize, sdfSize, 0,
-    GL_RGBA, GL_FLOAT, sdfInitsSDF.data());
-
-  glGenTextures(1, &normalTexture);
-  glBindTexture(GL_TEXTURE_3D, normalTexture);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-  std::vector<float> sdfInitNormal(numVoxels * 4, 0.0f);
-  glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, sdfSize, sdfSize, sdfSize, 0,
-    GL_RGBA, GL_FLOAT, sdfInitNormal.data());
-
-	// Compile diverge shader
-	divergeShader = glCreateProgram();
-	GLuint divergeCS = glCreateShader(GL_COMPUTE_SHADER);
-	std::ifstream file3("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/jfa_diverge.comp");
-	std::string code3((std::istreambuf_iterator<char>(file3)), std::istreambuf_iterator<char>());
-	const char* src3 = code3.c_str();
-	glShaderSource(divergeCS, 1, &src3, NULL);
-	glCompileShader(divergeCS);
-  glAttachShader(divergeShader, divergeCS);
-  glLinkProgram(divergeShader);
-	GLint success3 = 0;
-  glGetProgramiv(divergeShader, GL_LINK_STATUS, &success3);
-	if (!success3) {
-		char infoLog[512];
-		glGetShaderInfoLog(divergeShader, 512, NULL, infoLog);
-		std::cerr << "Diverge shader linking failed:\n" << infoLog << std::endl;
-	}
-	glDeleteShader(divergeCS);
-
-  // Compile seed shader
-  seedShader = glCreateProgram();
-  GLuint seedCS = glCreateShader(GL_COMPUTE_SHADER);
-  std::ifstream file1("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/jfa_step.comp");
-  std::string code1((std::istreambuf_iterator<char>(file1)), std::istreambuf_iterator<char>());
-  const char* src1 = code1.c_str();
-  glShaderSource(seedCS, 1, &src1, NULL);
-  glCompileShader(seedCS);
-
-  GLint success = 0;
-  glGetShaderiv(seedCS, GL_COMPILE_STATUS, &success);
-  if (!success) {
-    char infoLog[512];
-    glGetShaderInfoLog(seedCS, 512, NULL, infoLog);
-    std::cerr << "Seed shader compilation failed:\n" << infoLog << std::endl;
-  }
-
-  glAttachShader(seedShader, seedCS);
-  glLinkProgram(seedShader);
-
-  GLint linked = 0;
-  glGetProgramiv(seedShader, GL_LINK_STATUS, &linked);
-  if (!linked) {
-    char infoLog[512];
-    glGetProgramInfoLog(seedShader, 512, NULL, infoLog);
-    std::cerr << "Seed shader linking failed:\n" << infoLog << std::endl;
-  }
-
-  glDeleteShader(seedCS);
-
-  // Compile JFA propagation shader
-  jfaShader = glCreateProgram();
-  GLuint jfaCS = glCreateShader(GL_COMPUTE_SHADER);
-  std::ifstream file2("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/jfa_propagation.comp");
-  std::string code2((std::istreambuf_iterator<char>(file2)), std::istreambuf_iterator<char>());
-  const char* src2 = code2.c_str();
-  glShaderSource(jfaCS, 1, &src2, NULL);
-  glCompileShader(jfaCS);
-  glAttachShader(jfaShader, jfaCS);
-  glLinkProgram(jfaShader);
-	GLint jfaLinked = 0;
-	glGetProgramiv(jfaShader, GL_LINK_STATUS, &jfaLinked);
-	if (!jfaLinked) {
-		char infoLog[512];
-		glGetProgramInfoLog(jfaShader, 512, NULL, infoLog);
-		std::cerr << "JFA shader linking failed:\n" << infoLog << std::endl;
-	}
-  glDeleteShader(jfaCS);
-
-	// Create buffer for surface points and normals
-  double pixelArea = sdfVoxelLength * sdfVoxelLength;
-  glGenBuffers(1, &surfacePoints);
-	glGenBuffers(1, &surfaceNormals);
-  std::vector<std::pair<Vector3D, Vector3D>> surface_pts;
+	std::vector<int> sdfSizeArray, cardSizeArray, objCardArray;
+	std::vector<float> sdfCoordArray, sdfArray, cardCoordArray, cardNormalArray;
+  int sdfBias = 0, cardBias = 0, cardArrayBias = 0;
   for (GLScene::SceneObject* obj : scene->objects) {
-    std::vector<std::pair<Vector3D, Vector3D>> pts = obj->sample_points(pixelArea);
     // If the obj is the control_mesh
     if (static_cast<GLScene::Mesh*>(obj) == control_mesh) {
-			control_pts_offset = surface_pts.size();
-			control_pts_size = pts.size();
-			std::cout << "Control mesh found, "
-				<< "control_pts_offset: " << control_pts_offset
-				<< ", control_pts_size: " << control_pts_size << std::endl;
+      control_obj_idx = nanite_meshes.size();
     }
-    surface_pts.insert(surface_pts.end(), pts.begin(), pts.end());
-  }
-	numSurfacePts = surface_pts.size();
-  // Upload surface points
-  std::vector<float> surface_pts_f;
-  std::vector<float> surface_nms_f;
-  surface_pts_f.reserve(surface_pts.size() * 4);
-  for (const auto& p : surface_pts) {
-    surface_pts_f.push_back(static_cast<float>(p.first.x));
-    surface_pts_f.push_back(static_cast<float>(p.first.y));
-    surface_pts_f.push_back(static_cast<float>(p.first.z));
-    surface_pts_f.push_back(0.0f); // padding
+		nanite_meshes.emplace_back(static_cast<GLScene::Mesh*>(obj));
+		nanite_meshes.back().sdfBias = sdfBias;
+		nanite_meshes.back().cardBias = cardBias;
+		auto& nm = nanite_meshes.back();
+		sdfBias += nm.sx * nm.sy * nm.sz;
+		cardBias += nm.nCards;
 
-		surface_nms_f.push_back(static_cast<float>(p.second.x));
-		surface_nms_f.push_back(static_cast<float>(p.second.y));
-		surface_nms_f.push_back(static_cast<float>(p.second.z));
-		surface_nms_f.push_back(0.0f); // padding
-  }
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, surfacePoints);
-  glBufferData(GL_SHADER_STORAGE_BUFFER, surface_pts_f.size() * sizeof(float), surface_pts_f.data(), GL_STATIC_DRAW);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, surfaceNormals);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, surface_nms_f.size() * sizeof(float), surface_nms_f.data(), GL_STATIC_DRAW);
+		sdfSizeArray.push_back(nm.sx);
+		sdfSizeArray.push_back(nm.sy);
+		sdfSizeArray.push_back(nm.sz);
+		sdfSizeArray.push_back(nm.sdfBias);
 
-	// Compile ray shader
-  rayShader = glCreateProgram();
-  GLuint cs = glCreateShader(GL_COMPUTE_SHADER);
-  std::ifstream file("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/raymarch.comp");
-  std::string code((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-  const char* src = code.c_str();
-  glShaderSource(cs, 1, &src, NULL);
-  glCompileShader(cs);
-  glAttachShader(rayShader, cs);
-  glLinkProgram(rayShader);
+		sdfCoordArray.push_back(nm.ox);
+		sdfCoordArray.push_back(nm.oy);
+		sdfCoordArray.push_back(nm.oz);
+		for (int i = 0; i < 9; ++i) {
+			sdfCoordArray.push_back(nm.mat[i]);
+		}
+
+		sdfArray.insert(sdfArray.end(), nm.sdf.begin(), nm.sdf.end());
+
+		objCardArray.push_back(nm.cardBias);
+		objCardArray.push_back(nm.nCards);
+
+		for (int i = 0; i < nm.nCards; ++i) {
+			auto& card = nm.nanite_cards[i];
+			card.bias += cardArrayBias;
+			cardSizeArray.push_back(card.sx);
+			cardSizeArray.push_back(card.sy);
+			cardSizeArray.push_back(card.sz);
+			cardSizeArray.push_back(card.bias);
+
+			cardCoordArray.push_back(card.box.origin.x());
+			cardCoordArray.push_back(card.box.origin.y());
+			cardCoordArray.push_back(card.box.origin.z());
+			for (int j = 0; j < 9; ++j) {
+				cardCoordArray.push_back(card.mat[j]);
+			}
+
+			cardNormalArray.insert(cardNormalArray.end(), card.normals.begin(), card.normals.end());
+		}
+		cardArrayBias += nm.nCardsVoxels;
+  }
+
+	// Create the sdf size array
+	glGenBuffers(1, &sdfSizeArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, sdfSizeArray_g);
+	glBufferData(GL_ARRAY_BUFFER, sdfSizeArray.size() * sizeof(int), sdfSizeArray.data(), GL_STATIC_DRAW);
+	// Create the sdf coord array
+	glGenBuffers(1, &sdfCoordArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, sdfCoordArray_g);
+	glBufferData(GL_ARRAY_BUFFER, sdfCoordArray.size() * sizeof(float), sdfCoordArray.data(), GL_STATIC_DRAW);
+	// Create the sdf array
+	glGenBuffers(1, &sdfArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, sdfArray_g);
+	glBufferData(GL_ARRAY_BUFFER, sdfArray.size() * sizeof(float), sdfArray.data(), GL_STATIC_DRAW);
+	// Create the obj card array
+	glGenBuffers(1, &objCardArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, objCardArray_g);
+	glBufferData(GL_ARRAY_BUFFER, objCardArray.size() * sizeof(int), objCardArray.data(), GL_STATIC_DRAW);
+	// Create the card size array
+	glGenBuffers(1, &cardSizeArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, cardSizeArray_g);
+	glBufferData(GL_ARRAY_BUFFER, cardSizeArray.size() * sizeof(int), cardSizeArray.data(), GL_STATIC_DRAW);
+	// Create the card coord array
+	glGenBuffers(1, &cardCoordArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, cardCoordArray_g);
+	glBufferData(GL_ARRAY_BUFFER, cardCoordArray.size() * sizeof(float), cardCoordArray.data(), GL_STATIC_DRAW);
+	// Create the card normal array
+	glGenBuffers(1, &cardNormalArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, cardNormalArray_g);
+	glBufferData(GL_ARRAY_BUFFER, cardNormalArray.size() * sizeof(float), cardNormalArray.data(), GL_STATIC_DRAW);
+
+	// Create the screen texture
+	glGenTextures(1, &screenTexture);
+	glBindTexture(GL_TEXTURE_2D, screenTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, camera->screen_width(), camera->screen_height(), 0, GL_RGBA, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	// Create fullscreen quad
+	glGenVertexArrays(1, &quadVAO);
+	glGenVertexArrays(1, &quadVAO);
+	glBindVertexArray(quadVAO);
+
+	// Compile and link the ray shader
+	rayShader = glCreateProgram();
+	GLuint cs = glCreateShader(GL_COMPUTE_SHADER);
+	std::ifstream file("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/raymarch.comp");
+	std::string code((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+	const char* src = code.c_str();
+	glShaderSource(cs, 1, &src, NULL);
+	glCompileShader(cs);
+	glAttachShader(rayShader, cs);
+	glLinkProgram(rayShader);
 	GLint rayLinked = 0;
 	glGetProgramiv(rayShader, GL_LINK_STATUS, &rayLinked);
 	if (!rayLinked) {
@@ -164,25 +115,25 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 		glGetProgramInfoLog(rayShader, 512, NULL, infoLog);
 		std::cerr << "Ray shader linking failed:\n" << infoLog << std::endl;
 	}
-  glDeleteShader(cs);
+	glDeleteShader(cs);
 
 	// Compile fullscreen shader
-  GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-  GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-  std::ifstream vfile("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/fullscreen.vert");
-  std::ifstream ffile("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/fullscreen.frag");
-  std::string vcode((std::istreambuf_iterator<char>(vfile)), std::istreambuf_iterator<char>());
-  std::string fcode((std::istreambuf_iterator<char>(ffile)), std::istreambuf_iterator<char>());
-  const char* vsrc = vcode.c_str();
-  const char* fsrc = fcode.c_str();
-  glShaderSource(vs, 1, &vsrc, NULL);
-  glShaderSource(fs, 1, &fsrc, NULL);
-  glCompileShader(vs);
-  glCompileShader(fs);
-  fullscreenShader = glCreateProgram();
-  glAttachShader(fullscreenShader, vs);
-  glAttachShader(fullscreenShader, fs);
-  glLinkProgram(fullscreenShader);
+	GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+	GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+	std::ifstream vfile("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/fullscreen.vert");
+	std::ifstream ffile("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/fullscreen.frag");
+	std::string vcode((std::istreambuf_iterator<char>(vfile)), std::istreambuf_iterator<char>());
+	std::string fcode((std::istreambuf_iterator<char>(ffile)), std::istreambuf_iterator<char>());
+	const char* vsrc = vcode.c_str();
+	const char* fsrc = fcode.c_str();
+	glShaderSource(vs, 1, &vsrc, NULL);
+	glShaderSource(fs, 1, &fsrc, NULL);
+	glCompileShader(vs);
+	glCompileShader(fs);
+	fullscreenShader = glCreateProgram();
+	glAttachShader(fullscreenShader, vs);
+	glAttachShader(fullscreenShader, fs);
+	glLinkProgram(fullscreenShader);
 	GLint fullscreenLinked = 0;
 	glGetProgramiv(fullscreenShader, GL_LINK_STATUS, &fullscreenLinked);
 	if (!fullscreenLinked) {
@@ -190,198 +141,162 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 		glGetProgramInfoLog(fullscreenShader, 512, NULL, infoLog);
 		std::cerr << "Fullscreen shader linking failed:\n" << infoLog << std::endl;
 	}
-  glDeleteShader(vs);
-  glDeleteShader(fs);
-
-  // Comile control_mesh translation shader
-	translationShader = glCreateProgram();
-	GLuint translationCS = glCreateShader(GL_COMPUTE_SHADER);
-	std::ifstream translationFile("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/translation.comp");
-	std::string translationCode((std::istreambuf_iterator<char>(translationFile)), std::istreambuf_iterator<char>());
-	const char* translationSrc = translationCode.c_str();
-	glShaderSource(translationCS, 1, &translationSrc, NULL);
-	glCompileShader(translationCS);
-	glAttachShader(translationShader, translationCS);
-	glLinkProgram(translationShader);
-	GLint translationLinked = 0;
-	glGetProgramiv(translationShader, GL_LINK_STATUS, &translationLinked);
-	if (!translationLinked) {
-		char infoLog[512];
-		glGetProgramInfoLog(translationShader, 512, NULL, infoLog);
-		std::cerr << "Translation shader linking failed:\n" << infoLog << std::endl;
-	}
-	glDeleteShader(translationCS);
-
-	// Create fullscreen quad
-  glGenVertexArrays(1, &quadVAO);
-  glGenVertexArrays(1, &quadVAO);
-  glBindVertexArray(quadVAO);
-
-  // Allocate screen texture
-  glGenTextures(1, &screenTexture);
-  glBindTexture(GL_TEXTURE_2D, screenTexture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, camera->screen_width(), camera->screen_height(), 0, GL_RGBA, GL_FLOAT, nullptr);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glDeleteShader(vs);
+	glDeleteShader(fs);
 }
 
 SDFRenderer::~SDFRenderer() {
-  glDeleteBuffers(1, &surfacePoints);
-  glDeleteTextures(1, &sdfTexture);
+	// Delete the sdf arrays
+	glDeleteBuffers(1, &sdfSizeArray_g);
+	glDeleteBuffers(1, &sdfCoordArray_g);
+	glDeleteBuffers(1, &sdfArray_g);
+	// Delete the screen texture
+	glDeleteTextures(1, &screenTexture);
+	// Delete the fullscreen quad
+	glDeleteVertexArrays(1, &quadVAO);
+	// Delete the shaders
+	glDeleteProgram(rayShader);
+	glDeleteProgram(fullscreenShader);
 }
-
-void SDFRenderer::setCamera(Camera* cam) {
-  camera = cam;
-}
-
-void SDFRenderer::setScene(GLScene::Scene* sc) {
-  scene = sc;
-}
-
-void SDFRenderer::moveControlMesh(Vector3D delta) {
-	// Move control mesh points
-	glUseProgram(translationShader);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, surfacePoints);
-	glUniform1i(glGetUniformLocation(translationShader, "uOffset"), control_pts_offset);
-	glUniform1i(glGetUniformLocation(translationShader, "uSize"), control_pts_size);
-  glUniform3f(glGetUniformLocation(translationShader, "uDelta"),
-    static_cast<float>(delta.x),
-    static_cast<float>(delta.y),
-    static_cast<float>(delta.z));
-	glDispatchCompute(numSurfacePts / 64 + 1, 1, 1);
-	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-  // Add all sdf value by sdfVoxelLength / 2
-  glUseProgram(divergeShader);
-  glBindImageTexture(0, sdfTexture, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA32F);
-  glUniform1f(glGetUniformLocation(divergeShader, "uVoxelSize"), static_cast<float>(sdfVoxelLength));
-  glUniform1i(glGetUniformLocation(divergeShader, "uSdfSize"), sdfSize);
-  glDispatchCompute(sdfSize / 8, sdfSize / 8, sdfSize / 8);
-  glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-}
-
-void SDFRenderer::computeSDF() {
-  // Seed pass
-  glUseProgram(seedShader);
-  glBindImageTexture(0, sdfTexture, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA32F);
-	glBindImageTexture(1, normalTexture, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA32F);
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, surfacePoints);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, surfaceNormals);
-
-  glUniform3f(glGetUniformLocation(seedShader, "uBoundingBoxOrigin"),
-    static_cast<float>(bbox_min.x),
-    static_cast<float>(bbox_min.y),
-    static_cast<float>(bbox_min.z));
-  glUniform1f(glGetUniformLocation(seedShader, "uVoxelSize"), static_cast<float>(sdfVoxelLength));
-  glUniform1i(glGetUniformLocation(seedShader, "uSdfSize"), sdfSize);
-
-  glDispatchCompute(numSurfacePts / 64 + 1, 1, 1);
-  glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-  // JFA propagation passes
-  glUseProgram(jfaShader);
-  glBindImageTexture(0, sdfTexture, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA32F);
-	glBindImageTexture(1, normalTexture, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA32F);
-  glUniform3f(glGetUniformLocation(seedShader, "uBoundingBoxOrigin"),
-    static_cast<float>(bbox_min.x),
-    static_cast<float>(bbox_min.y),
-    static_cast<float>(bbox_min.z));
-  glUniform1f(glGetUniformLocation(jfaShader, "uVoxelSize"), (float)sdfVoxelLength);
-  glUniform1i(glGetUniformLocation(jfaShader, "uSdfSize"), sdfSize);
-  glDispatchCompute(sdfSize / 8, sdfSize / 8, sdfSize / 8);
-  glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-	//std::cout << "SDF computed" << std::endl;
-
-	// Plot SDF points
- // std::vector<float> sdfCPU(sdfSize * sdfSize * sdfSize * 4);
- // glBindTexture(GL_TEXTURE_3D, sdfTexture);
- // glGetTexImage(GL_TEXTURE_3D, 0, GL_RGBA, GL_FLOAT, sdfCPU.data());
- // glPointSize(3.0f);
-	//glDisable(GL_LIGHTING);
- // glBegin(GL_POINTS);
- // glColor3f(1.0f, 0.0f, 0.0f);
- // for (int z = 0; z < sdfSize; ++z) {
- //   for (int y = 0; y < sdfSize; ++y) {
- //     for (int x = 0; x < sdfSize; ++x) {
- //       int idx = x + y * sdfSize + z * sdfSize * sdfSize;
- //       float dist = sdfCPU[idx * 4 + 3];
- //       if (abs(dist) < 0.001f) {
- //         Vector3D p_world = bbox_min +
- //           Vector3D((x + 0.5f) * sdfVoxelLength,
- //             (y + 0.5f) * sdfVoxelLength,
- //             (z + 0.5f) * sdfVoxelLength);
- //         glVertex3d(p_world.x, p_world.y, p_world.z);
- //       }
- //     }
- //   }
- // }
- // glEnd();
-	//std::cout << "SDF points count: " << cnt << std::endl;
-}
-
 
 void SDFRenderer::render() {
-  if (!camera || !scene) return;
+	// Use the ray shader
+	glUseProgram(rayShader);
+	// Bind the arrays
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sdfSizeArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sdfCoordArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sdfArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, objCardArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, cardSizeArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, cardCoordArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, cardNormalArray_g);
+	// Bind the screen texture
+	glBindImageTexture(7, screenTexture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+	
+	// Camera and screen parameters
+	Vector3D camPos = camera->position();
+	Vector3D view = (camera->view_point() - camPos).unit();
+	Vector3D up = camera->up_dir().unit();
+	Vector3D right = cross(view, up).unit();
+	float c2w_flat[9] = {
+		static_cast<float>(right[0]), static_cast<float>(right[1]), static_cast<float>(right[2]),
+		static_cast<float>(up[0]), static_cast<float>(up[1]), static_cast<float>(up[2]),
+		static_cast<float>(-view[0]), static_cast<float>(-view[1]), static_cast<float>(-view[2])
+	};
+	// Upload uniforms
+	glUniform3f(glGetUniformLocation(rayShader, "uCameraPos"), static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
+	glUniformMatrix3fv(glGetUniformLocation(rayShader, "uC2WMatrix"), 1, GL_FALSE, c2w_flat);
+	glUniform1i(glGetUniformLocation(rayShader, "uScreenW"), camera->screen_width());
+	glUniform1i(glGetUniformLocation(rayShader, "uScreenH"), camera->screen_height());
+	float tanFovY = tanf(0.5f * radians(camera->v_fov()));
+	glUniform1f(glGetUniformLocation(rayShader, "uTanFovY"), tanFovY);
+	glUniform1f(glGetUniformLocation(rayShader, "uAspect"), static_cast<float>(camera->aspect_ratio()));
+	glUniform1i(glGetUniformLocation(rayShader, "uNumObjects"), nanite_meshes.size());
 
-  // This function should cast rays from the camera into the SDF field
-  glUseProgram(rayShader);
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_3D, sdfTexture);
-  glUniform1i(glGetUniformLocation(rayShader, "sdfTexture"), 0);
-  glBindImageTexture(1, screenTexture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-
-  // Camera and screen parameters
-  Vector3D camPos = camera->position();
-  Vector3D view = (camera->view_point() - camPos).unit();
-  Vector3D up = camera->up_dir().unit();
-  Vector3D right = cross(view, up).unit();
-
-  float c2w_flat[9] = {
-    static_cast<float>(right[0]), static_cast<float>(right[1]), static_cast<float>(right[2]),
-    static_cast<float>(up[0]), static_cast<float>(up[1]), static_cast<float>(up[2]),
-    static_cast<float>(-view[0]), static_cast<float>(-view[1]), static_cast<float>(-view[2])
-  };
-
-  // Upload uniforms
-  glUniform3f(glGetUniformLocation(rayShader, "uCameraPos"), static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
-  glUniformMatrix3fv(glGetUniformLocation(rayShader, "uC2WMatrix"), 1, GL_FALSE, c2w_flat);
-  glUniform3f(glGetUniformLocation(rayShader, "uBoundingBoxOrigin"), static_cast<float>(bbox_min.x), static_cast<float>(bbox_min.y), static_cast<float>(bbox_min.z));
-  glUniform1f(glGetUniformLocation(rayShader, "uVoxelSize"), static_cast<float>(sdfVoxelLength));
-  glUniform1i(glGetUniformLocation(rayShader, "uSdfSize"), sdfSize);
-  glUniform1i(glGetUniformLocation(rayShader, "uScreenW"), camera->screen_width());
-  glUniform1i(glGetUniformLocation(rayShader, "uScreenH"), camera->screen_height());
-  float tanFovY = tanf(0.5f * radians(camera->v_fov()));
-  glUniform1f(glGetUniformLocation(rayShader, "uTanFovY"), tanFovY);
-  glUniform1f(glGetUniformLocation(rayShader, "uAspect"), static_cast<float>(camera->aspect_ratio()));
-
-  glDispatchCompute((camera->screen_width() + 7) / 8, (camera->screen_height() + 7) / 8, 1);
-  glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-	// Step 2: Download screen texture from GPU
-	//std::vector<float> screenCPU(camera->screen_width() * camera->screen_height() * 4);
-	//glBindTexture(GL_TEXTURE_2D, screenTexture);
-	//glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, screenCPU.data());
-	//float hitmax = 0.0f;
-	//for (int i = 0; i < camera->screen_width() * camera->screen_height(); ++i) {
-	//	hitmax = std::max(hitmax, screenCPU[i * 4 + 0]);
-	//}
-	//for (int i = 0; i < camera->screen_width() * camera->screen_height(); ++i) {
-	//	screenCPU[i * 4 + 0] /= hitmax;
-	//	screenCPU[i * 4 + 1] /= hitmax;
-	//	screenCPU[i * 4 + 2] /= hitmax;
-	//	screenCPU[i * 4 + 3] = 1.0f;
-	//}
- // // Use glDrawPixels
- // int screenW = camera->screen_width();
- // int screenH = camera->screen_height();
- // glDrawPixels(screenW, screenH, GL_RGBA, GL_FLOAT, screenCPU.data());
+	// Dispatch compute shader
+	int groups_x = (camera->screen_width() + 7) / 8;
+	int groups_y = (camera->screen_height() + 7) / 8;
+	glDispatchCompute(groups_x, groups_y, 1);
+	glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT); // ensure writes are visible
 
   // Draw fullscreen quad
-  glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT);
   glUseProgram(fullscreenShader);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, screenTexture);
   glUniform1i(glGetUniformLocation(fullscreenShader, "screenImage"), 0);
   glBindVertexArray(quadVAO);
   glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
+void SDFRenderer::visualizeCards() {
+	// Visualize the Cards
+	// Switch back to 3D camera projection
+	glUseProgram(0);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	gluPerspective(camera->v_fov(), camera->aspect_ratio(), 0.1, 1000.0); // near/far planes
+
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	Vector3D eye = camera->position();
+	Vector3D center = camera->view_point();
+	Vector3D up = camera->up_dir();
+	gluLookAt(eye.x, eye.y, eye.z, center.x, center.y, center.z, up.x, up.y, up.z);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_LIGHTING);
+	glLineWidth(1.0f);              // make lines visible
+	for (int i = 0; i < nanite_meshes.size(); ++i) {
+		const auto& nanite_cards = nanite_meshes[i].cards;
+		for (const auto& card : nanite_cards) {
+			const Eigen::Vector3f& o = card.origin;
+			const Eigen::Matrix3f& r = card.rotation;
+			const Eigen::Vector3f& e = card.extent;
+
+			// Basis-scaled axes
+			Eigen::Vector3f x = r.col(0) * e.x();
+			Eigen::Vector3f y = r.col(1) * e.y();
+			Eigen::Vector3f z = r.col(2) * e.z();
+
+			// Compute corners
+			Eigen::Vector3f c0 = o;
+			Eigen::Vector3f c1 = o + x;
+			Eigen::Vector3f c2 = o + y;
+			Eigen::Vector3f c3 = o + z;
+			Eigen::Vector3f c4 = o + x + y;
+			Eigen::Vector3f c5 = o + x + z;
+			Eigen::Vector3f c6 = o + y + z;
+			Eigen::Vector3f c7 = o + x + y + z;
+
+			glColor3f(1.0f, 0.0f, 0.0f);
+			glBegin(GL_LINES);
+
+			// Bottom square
+			glVertex3fv(c0.data()); glVertex3fv(c1.data());
+			glVertex3fv(c0.data()); glVertex3fv(c2.data());
+			glVertex3fv(c1.data()); glVertex3fv(c4.data());
+			glVertex3fv(c2.data()); glVertex3fv(c4.data());
+
+			// Top square
+			glVertex3fv(c3.data()); glVertex3fv(c5.data());
+			glVertex3fv(c3.data()); glVertex3fv(c6.data());
+			glVertex3fv(c5.data()); glVertex3fv(c7.data());
+			glVertex3fv(c6.data()); glVertex3fv(c7.data());
+
+			// Vertical edges
+			glVertex3fv(c0.data()); glVertex3fv(c3.data());
+			glVertex3fv(c1.data()); glVertex3fv(c5.data());
+			glVertex3fv(c2.data()); glVertex3fv(c6.data());
+			glVertex3fv(c4.data()); glVertex3fv(c7.data());
+
+			glEnd();
+		}
+	}
+}
+
+void SDFRenderer::moveControlMesh(Vector3D delta) {
+	// Move the origin of the control mesh sdf coordinate
+	NaniteMesh& control = nanite_meshes[control_obj_idx];
+	control.ox += static_cast<float>(delta.x);
+	control.oy += static_cast<float>(delta.y);
+	control.oz += static_cast<float>(delta.z);
+
+	// Update the sdfCoordArray_g at [control_obj_idx * 12 : control_obj_idx * 12 + 3]
+	float new_origin[3] = {
+		control.ox,
+		control.oy,
+		control.oz
+	};
+
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, sdfCoordArray_g);
+	glBufferSubData(GL_SHADER_STORAGE_BUFFER,
+		control_obj_idx * 12 * sizeof(float),
+		3 * sizeof(float),
+		new_origin);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	// Move the cards
+	for (auto& card : control.cards) {
+		card.origin += Eigen::Vector3f(delta.x, delta.y, delta.z);
+	}
 }

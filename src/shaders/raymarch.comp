@@ -1,72 +1,183 @@
 #version 430
 
-layout (local_size_x = 8, local_size_y = 8) in;
+layout(local_size_x = 8, local_size_y = 8) in;
 
-layout (binding = 0) uniform sampler3D sdfTexture;
-layout (rgba32f, binding = 1) uniform image2D screenImage;
+layout(std430, binding = 0) buffer sdfSizeArray{ int sdfSize[]; };
+layout(std430, binding = 1) buffer sdfCoordArray{ float sdfCoord[]; };
+layout(std430, binding = 2) buffer sdfArray{ float sdf[]; };
+layout(std430, binding = 3) buffer objCardArray{ int objCard[]; };
+layout(std430, binding = 4) buffer cardSizeArray{ int cardSize[]; };
+layout(std430, binding = 5) buffer cardCoordArray{ float cardCoord[]; };
+layout(std430, binding = 6) buffer cardNormalArray{ float cardNormal[]; };
+layout(rgba32f, binding = 7) uniform image2D screenImage;
 
-uniform vec3 uBoundingBoxOrigin;
-uniform float uVoxelSize;
-uniform int uSdfSize;
 
 uniform vec3 uCameraPos;
 uniform mat3 uC2WMatrix; // camera to world matrix
-
 uniform int uScreenW;
 uniform int uScreenH;
 uniform float uTanFovY;
 uniform float uAspect;
 
-vec4 sampleSDF(vec3 p_world) {
-    vec3 p_grid = (p_world - uBoundingBoxOrigin) / (uVoxelSize * float(uSdfSize));
-    if (any(lessThan(p_grid, vec3(0.0))) || any(greaterThanEqual(p_grid, vec3(1.0))))
-        return vec4(0.0, 0.0, 0.0, 100.0);
+uniform int uNumObjects;
 
-    return texture(sdfTexture, p_grid);
+const int maxSteps = 128;
+const float epsilon = 0.01;
+const float maxMarchDist = 10.0;
+
+
+
+float sampleAt(ivec3 coord, ivec3 size, int sdfBias, float bv) {
+    if (any(lessThan(coord, ivec3(0))) || any(greaterThanEqual(coord, size)))
+        return bv;
+    int index = sdfBias + coord.x + coord.y * size.x + coord.z * size.x * size.y;
+    return sdf[index];
 }
 
-float hitBoundingBox(vec3 origin, vec3 dir, out vec3 new_origin, out float tend) {
-    vec3 boxMin = uBoundingBoxOrigin;
-    vec3 boxMax = uBoundingBoxOrigin + vec3(uSdfSize) * uVoxelSize;
+float sampleSDF(vec3 p_sdf, ivec3 size, int sdfBias) {
+    ivec3 base = ivec3(floor(p_sdf));
+    if (any(lessThan(base, ivec3(0))) || any(greaterThanEqual(base, size)))
+        return maxMarchDist;
 
-    vec3 invDir = 1.0 / dir;
-    vec3 t0s = (boxMin - origin) * invDir;
-    vec3 t1s = (boxMax - origin) * invDir;
+    vec3 offset = p_sdf - (vec3(base) + vec3(0.5));
+    int dx = int(sign(offset.x));
+    int dy = int(sign(offset.y));
+    int dz = int(sign(offset.z));
+    offset = abs(offset);
 
-    vec3 tsmaller = min(t0s, t1s);
-    vec3 tbigger = max(t0s, t1s);
+    ivec3 c000 = base;
+    ivec3 c100 = base + ivec3(dx, 0, 0);
+    ivec3 c010 = base + ivec3(0, dy, 0);
+    ivec3 c110 = base + ivec3(dx, dy, 0);
+    ivec3 c001 = base + ivec3(0, 0, dz);
+    ivec3 c101 = base + ivec3(dx, 0, dz);
+    ivec3 c011 = base + ivec3(0, dy, dz);
+    ivec3 c111 = base + ivec3(dx, dy, dz);
 
-    float tNear = max(max(tsmaller.x, tsmaller.y), tsmaller.z);
-    float tFar = min(min(tbigger.x, tbigger.y), tbigger.z);
+    float v000 = sampleAt(c000, size, sdfBias, 0.0);
+    float v100 = sampleAt(c100, size, sdfBias, v000);
+    float v010 = sampleAt(c010, size, sdfBias, v000);
+    float v110 = sampleAt(c110, size, sdfBias, v000);
+    float v001 = sampleAt(c001, size, sdfBias, v000);
+    float v101 = sampleAt(c101, size, sdfBias, v000);
+    float v011 = sampleAt(c011, size, sdfBias, v000);
+    float v111 = sampleAt(c111, size, sdfBias, v000);
 
-    if (tNear <= 0.0 && tFar >= 0.0) {
-        // Ray starts inside the box
-        new_origin = origin;
-        tend = tFar;
-        return tFar;
+    float v00 = mix(v000, v100, offset.x);
+    float v10 = mix(v010, v110, offset.x);
+    float v01 = mix(v001, v101, offset.x);
+    float v11 = mix(v011, v111, offset.x);
+
+    float v0 = mix(v00, v10, offset.y);
+    float v1 = mix(v01, v11, offset.y);
+
+    return mix(v0, v1, offset.z);
+}
+
+bool intersectAABB(vec3 ro, vec3 rd, vec3 boxMin, vec3 boxMax, out float t_near, out float t_far) {
+    vec3 invDir = 1.0 / rd;
+    vec3 t0 = (boxMin - ro) * invDir;
+    vec3 t1 = (boxMax - ro) * invDir;
+    vec3 tsmaller = min(t0, t1);
+    vec3 tbigger = max(t0, t1);
+    t_near = max(max(tsmaller.x, tsmaller.y), tsmaller.z);
+    t_far = min(min(tbigger.x, tbigger.y), tbigger.z);
+    return t_far >= max(t_near, 0.0);
+}
+
+vec3 getCardNormal(vec3 p_world, int obj_idx) {
+    int start = objCard[obj_idx * 2];
+    int end = start + objCard[obj_idx * 2 + 1];
+    for (int i = start; i < end; ++i) {
+        ivec3 size = ivec3(
+            cardSize[i * 4 + 0],
+            cardSize[i * 4 + 1],
+            cardSize[i * 4 + 2]
+        );
+        int cardBias = cardSize[i * 4 + 3];
+        vec3 cardOrigin = vec3(
+            cardCoord[i * 12 + 0],
+            cardCoord[i * 12 + 1],
+            cardCoord[i * 12 + 2]
+        );
+        mat3 cardTransform = mat3(
+            vec3(cardCoord[i * 12 + 3], cardCoord[i * 12 + 4], cardCoord[i * 12 + 5]),
+            vec3(cardCoord[i * 12 + 6], cardCoord[i * 12 + 7], cardCoord[i * 12 + 8]),
+            vec3(cardCoord[i * 12 + 9], cardCoord[i * 12 +10], cardCoord[i * 12 +11])
+        );
+        vec3 p_card = cardTransform * (p_world - cardOrigin);
+        ivec3 base = ivec3(floor(p_card));
+        if (any(lessThan(base, ivec3(0))) || any(greaterThanEqual(base, size)))
+            continue;
+        int idx = cardBias + base.x + base.y * size.x + base.z * size.x * size.y;
+        return vec3(
+            cardNormal[idx * 3 + 0],
+            cardNormal[idx * 3 + 1],
+            cardNormal[idx * 3 + 2]
+        );
+        // return vec3(1.0);
+    }
+    return vec3(0.5);
+}
+
+bool intersect(vec3 rayo, vec3 rayd, int obj_idx, out float t_hit, out vec3 normal) {
+    int sizeArrayBias = obj_idx * 4;
+    int coordArrayBias = obj_idx * 12;
+    
+    ivec3 size = ivec3(
+        sdfSize[sizeArrayBias + 0],
+        sdfSize[sizeArrayBias + 1],
+        sdfSize[sizeArrayBias + 2]
+    );
+    int sdfBias = sdfSize[sizeArrayBias + 3];
+    vec3 sdfOrigin = vec3(
+        sdfCoord[coordArrayBias + 0],
+        sdfCoord[coordArrayBias + 1],
+        sdfCoord[coordArrayBias + 2]
+    );
+    mat3 sdfTransform = mat3(
+        vec3(sdfCoord[coordArrayBias + 3], sdfCoord[coordArrayBias + 4], sdfCoord[coordArrayBias + 5]),
+        vec3(sdfCoord[coordArrayBias + 6], sdfCoord[coordArrayBias + 7], sdfCoord[coordArrayBias + 8]),
+        vec3(sdfCoord[coordArrayBias + 9], sdfCoord[coordArrayBias +10], sdfCoord[coordArrayBias +11])
+    );
+
+    vec3 rayo_sdf = sdfTransform * (rayo - sdfOrigin);
+    vec3 rayd_sdf = sdfTransform * rayd;
+
+    // Intersect ray_sdf with the bounding box with min (0, 0, 0) and max vec3(size)
+    float t_near, t_far;
+    if (!intersectAABB(rayo_sdf, rayd_sdf, vec3(0.0), vec3(size), t_near, t_far))
+        return false;
+
+    // Ray marching in the sdf space
+    float t = t_near + 0.0001;
+    for (int i = 0; i < maxSteps && t < t_far; ++i) {
+        vec3 p = rayo_sdf + t * rayd_sdf;
+        float d = sampleSDF(p, size, sdfBias);
+        if (d < epsilon) {
+            t_hit = t;
+            normal = getCardNormal(rayo + t * rayd, obj_idx);
+            return true;
+        }
+        t += d;
+        if (t > maxMarchDist) break;
     }
 
-    if (tNear <= tFar && tNear >= 0.0) {
-        // Ray enters the box from outside
-        new_origin = origin + dir * (tNear + 0.00001);
-        tend = tFar - tNear;
-        return tNear;
-    }
-
-    return -1.0; // No intersection
+    // No hit
+    t_hit = maxMarchDist;
+    normal = vec3(0.0);
+    return false;
 }
 
 void main() {
     ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
     if (pix.x >= uScreenW || pix.y >= uScreenH) return;
 
-    float totalDist = 0.0;
-    int maxSteps = 128;
-    float threshold = uVoxelSize / 2.0;
-    vec3 normal = vec3(0.0);
+    vec3 totalNormal = vec3(0.0);
+    float total_t = 0.0;
 
     for (int i = 0; i < 64; ++i) {
-        vec2 jitter = vec2(i % 10, i / 10) / 10.0 - 0.5;
+        vec2 jitter = vec2(i % 8, i / 8) / 8.0 - 0.5;
 
         vec2 screenUV = (vec2(pix) + 0.5 + jitter) / vec2(uScreenW, uScreenH);
         vec2 ndc = screenUV * 2.0 - 1.0;
@@ -75,34 +186,27 @@ void main() {
         vec3 rayd = normalize(rayo);
         rayo = uCameraPos + rayo;
 
-        vec3 new_origin;
-        float tend = 100.0; // far plane distance
-        float intersect_t = hitBoundingBox(rayo, rayd, new_origin, tend);
-        if (intersect_t < 0.0) {
-            totalDist += 5.0; // No intersection, add a large value
-            continue;
+        float mint = maxMarchDist;
+        vec3 min_normal = vec3(0.0);
+        for (int n = 0; n < uNumObjects; ++n) {
+            float t_hit;
+            vec3 normal;
+            if (intersect(rayo, rayd, n, t_hit, normal)) {
+                if (t_hit < mint) {
+                    mint = t_hit;
+                    min_normal = normal;
+                }
+            }
         }
 
-        float t = 0.0;
-        for (int step = 0; step < maxSteps; ++step) {
-            vec3 p = new_origin + t * rayd;
-            vec4 sdf = sampleSDF(p);
-            float d = sdf.w;
-            if (abs(d) < threshold) {
-                totalDist += t;
-                normal = normalize(sdf.xyz);
-                break;
-            }
-            if (t > tend) {
-                totalDist += 10.0; // No intersection, add a large value
-                break;
-            }
-
-            t += abs(d);
+        totalNormal += min_normal;
+        if (mint < maxMarchDist) {
+            total_t += mint;
         }
     }
 
-    float avgDist = totalDist / 100.0;
-    // imageStore(screenImage, pix, vec4(avgDist / 10.0));
-    imageStore(screenImage, pix, vec4(normal, 1.0));
+    vec3 avgNormal = totalNormal / 64.0;
+    imageStore(screenImage, pix, vec4(avgNormal, 1.0));
+    // float avg_t = total_t / 64.0;
+    // imageStore(screenImage, pix, vec4(vec3(avg_t / maxMarchDist), 1.0));
 }

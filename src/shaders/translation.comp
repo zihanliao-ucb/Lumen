@@ -17,3 +17,11 @@ void main() {
   uint index = uint(uOffset) + gid;
   points[index].xyz += uDelta;
 }
+
+float sampleSDF(vec3 p_sdf, ivec3 size, int sdfBias) {
+    ivec3 coord = ivec3(floor(p_sdf));
+    if (any(lessThan(coord, ivec3(0))) || any(greaterThanEqual(coord, size)))
+        return maxMarchDist;
+    int index = sdfBias + coord.x + coord.y * size.x + coord.z * size.x * size.y;
+    return sdf[index];
+}

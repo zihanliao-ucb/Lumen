@@ -75,6 +75,8 @@ class Mesh : public SceneObject, public MeshView {
   void resample();
 	void move(float dx, float dy);
   std::vector<std::pair<Vector3D, Vector3D>> sample_points(double pixelSize);
+  // halfEdge mesh
+  HalfedgeMesh mesh;
 
  private:
 
@@ -111,8 +113,6 @@ class Mesh : public SceneObject, public MeshView {
   MeshFeature potentialFeature, hoveredFeature, selectedFeature;
 	DrawStyle *defaultStyle, *hoveredStyle, *selectedStyle;
 
-  // halfEdge mesh
-  HalfedgeMesh mesh;
   MeshResampler resampler;
 
   // material

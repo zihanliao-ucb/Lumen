@@ -11,6 +11,8 @@ option(BUILD_DOCS      "Build documentation"          OFF)
 
 set(BUILD_DEBUG ${BUILD_DEBUG} CACHE BOOL "Build debug" FORCE)
 
+include_directories("D:/UCB 25Spring/CS 284A/eigen-3.4.0/eigen-3.4.0")
+
 if (BUILD_DEBUG)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
@@ -86,6 +88,7 @@ set(APPLICATION_3_2_SOURCE
     src/imgui/backends/imgui_impl_opengl2.cpp
     # sdf
     src/sdf/sdf.cpp
+    src/sdf/NaniteMesh.cpp
 )
 
 set(APPLICATION_HEADERS
@@ -143,7 +146,9 @@ set(APPLICATION_HEADERS
     src/application/meshEdit.h
     src/application/renderer.h
     # sdf
-    src/sdf/sdf.h)
+    src/sdf/sdf.h
+    src/sdf/NaniteMesh.h
+)
 
 if (WIN32)
     list(APPEND APPLICATION_3_1_SOURCE src/util/win32/getopt.c)

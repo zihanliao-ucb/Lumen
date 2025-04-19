@@ -35,6 +35,7 @@ Mesh::Mesh(Collada::PolymeshInfo& polyMesh, const Matrix4x4& transform) {
   vector<Vector2D> texcoords = polyMesh.texcoords; // DELIBERATE COPY.
 
   mesh.build(polygons, vertices, texcoords);
+	std::cout << "Mesh has " << mesh.nFaces() << " triangles." << std::endl;
   if (polyMesh.material) {
     bsdf = polyMesh.material->bsdf;
   } else {

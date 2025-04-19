@@ -159,8 +159,9 @@ void Application::render() {
       break;
     case RENDER_MODE:
       //renderer->update_screen();
-      sdf_renderer->computeSDF();
+      //sdf_renderer->computeSDF();
       sdf_renderer->render();
+			sdf_renderer->visualizeCards();
       break;
   }
 

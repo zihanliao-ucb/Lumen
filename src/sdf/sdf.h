@@ -5,6 +5,7 @@
 #include "pathtracer/camera.h"
 #include "scene/gl_scene/scene.h"
 #include "scene/gl_scene/mesh.h" 
+#include "sdf/NaniteMesh.h"
 
 #include <iostream>
 #include <vector>
@@ -18,35 +19,24 @@ namespace CGL {
 		SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* control_mesh);
 		~SDFRenderer();
 		void render(); // cast ray from camera to sdf
-		void setCamera(Camera* cam);
-		void setScene(GLScene::Scene* sc);
-		void computeSDF(); // compute sdf using JFA
 		void moveControlMesh(Vector3D delta); // move control mesh
+		void visualizeCards(); // visualize the cards
 
 	private:
-		int numSurfacePts;
-		int control_pts_offset; // offset of the control mesh points in the surface points buffer
-		int control_pts_size; // size of the control mesh points
-		Vector3D bbox_min; // min point of the bounding box
-		double sdfVoxelLength; // length of each voxel in the sdf
-		double sdfSize; // length of the sdf
+		int control_obj_idx; // offset of the control mesh points in the surface points buffer
+
 		Camera* camera;
 		GLScene::Mesh* control_mesh;
-
 		GLScene::Scene* scene;
-		GLuint surfacePoints;
-		GLuint surfaceNormals;
-		GLuint sdfTexture; // 3D sdf field stored in a 3D texture
-		GLuint normalTexture;
+		std::vector<NaniteMesh> nanite_meshes; // list of nanite meshes
+
+		GLuint sdfSizeArray_g, sdfCoordArray_g, sdfArray_g, objCardArray_g, cardSizeArray_g, cardCoordArray_g, cardNormalArray_g;
+
 		GLuint screenTexture;
 		GLuint quadVAO;
 
-		GLuint divergeShader;
-		GLuint seedShader;
-		GLuint jfaShader;
 		GLuint rayShader;
 		GLuint fullscreenShader;
-		GLuint translationShader;
 	};
 
 };
