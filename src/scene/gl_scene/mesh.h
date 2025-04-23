@@ -77,6 +77,7 @@ class Mesh : public SceneObject, public MeshView {
   std::vector<std::pair<Vector3D, Vector3D>> sample_points(double pixelSize);
   // halfEdge mesh
   HalfedgeMesh mesh;
+	bool reverseNormals;
 
  private:
 

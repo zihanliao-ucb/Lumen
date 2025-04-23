@@ -7,7 +7,7 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
   : camera(camera), scene(scene), control_mesh(control_mesh) {
 
 	std::vector<int> sdfSizeArray, cardSizeArray, objCardArray;
-	std::vector<float> sdfCoordArray, sdfArray, cardCoordArray, cardNormalArray;
+	std::vector<float> sdfCoordArray, sdfArray, cardCoordArray, cardSurfaceArray, cardPointArray, cardRadianceArray;
   int sdfBias = 0, cardBias = 0, cardArrayBias = 0;
   for (GLScene::SceneObject* obj : scene->objects) {
     // If the obj is the control_mesh
@@ -38,6 +38,17 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 		objCardArray.push_back(nm.cardBias);
 		objCardArray.push_back(nm.nCards);
 
+		Vector3D reflectance = static_cast<DiffuseBSDF*>(nm.mesh->get_bsdf())->reflectance;
+		Eigen::Vector3f color = Vector3f_fromCGL(reflectance);
+		cardSurfaceArray.insert(cardSurfaceArray.end(), color.data(), color.data() + 3);
+		cardSurfaceArray.push_back(1.0); // roughness
+
+		Vector3D emission = nm.mesh->get_bsdf()->get_emission();
+		Eigen::Vector3f emissionColor = Vector3f_fromCGL(emission);
+		cardSurfaceArray.insert(cardSurfaceArray.end(), emissionColor.data(), emissionColor.data() + 3);
+
+		std::cout << "Card surface: " << color.transpose() << " " << 1.0f << " " << emissionColor.transpose() << std::endl;
+
 		for (int i = 0; i < nm.nCards; ++i) {
 			auto& card = nm.nanite_cards[i];
 			card.bias += cardArrayBias;
@@ -48,13 +59,17 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 			Eigen::Matrix3f M = card.getTransform();
 			cardCoordArray.insert(cardCoordArray.end(), M.data(), M.data() + 9);
 
-			std::vector<float> cardNormalData = card.getNormalData();
-			cardNormalArray.insert(cardNormalArray.end(), cardNormalData.begin(), cardNormalData.end());
+			std::vector<float> cardPointData = card.getPointData();
+			cardPointArray.insert(cardPointArray.end(), cardPointData.begin(), cardPointData.end());
+
 		}
 		cardArrayBias += nm.nCardsVoxels;
   }
+	total_card_voxels = cardArrayBias;
 
-	std::cout << "Total card size: " << cardArrayBias << std::endl;
+	cardRadianceArray.resize(total_card_voxels * 64 * 3, 0.0f);
+
+	std::cout << "Total card size: " << total_card_voxels << std::endl;
 	std::cout << "Screen size: " << camera->screen_width() * camera->screen_height() << std::endl;
 
 	// Create the sdf size array
@@ -81,10 +96,18 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 	glGenBuffers(1, &cardCoordArray_g);
 	glBindBuffer(GL_ARRAY_BUFFER, cardCoordArray_g);
 	glBufferData(GL_ARRAY_BUFFER, cardCoordArray.size() * sizeof(float), cardCoordArray.data(), GL_STATIC_DRAW);
-	// Create the card normal array
-	glGenBuffers(1, &cardNormalArray_g);
-	glBindBuffer(GL_ARRAY_BUFFER, cardNormalArray_g);
-	glBufferData(GL_ARRAY_BUFFER, cardNormalArray.size() * sizeof(float), cardNormalArray.data(), GL_STATIC_DRAW);
+	// Create the card surface array
+	glGenBuffers(1, &cardSurfaceArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, cardSurfaceArray_g);
+	glBufferData(GL_ARRAY_BUFFER, cardSurfaceArray.size() * sizeof(float), cardSurfaceArray.data(), GL_STATIC_DRAW);
+	// Create the card points array
+	glGenBuffers(1, &cardPointArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, cardPointArray_g);
+	glBufferData(GL_ARRAY_BUFFER, cardPointArray.size() * sizeof(float), cardPointArray.data(), GL_STATIC_DRAW);
+	// Create the card radiance array
+	glGenBuffers(1, &cardRadianceArray_g);
+	glBindBuffer(GL_ARRAY_BUFFER, cardRadianceArray_g);
+	glBufferData(GL_ARRAY_BUFFER, cardRadianceArray.size() * sizeof(float), cardRadianceArray.data(), GL_STATIC_DRAW);
 
 	// Create the screen texture
 	glGenTextures(1, &screenTexture);
@@ -96,6 +119,25 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 	glGenVertexArrays(1, &quadVAO);
 	glGenVertexArrays(1, &quadVAO);
 	glBindVertexArray(quadVAO);
+
+	// Compile and link the Lumen shader
+	lumenShader = glCreateProgram();
+	GLuint cs_lumen = glCreateShader(GL_COMPUTE_SHADER);
+	std::ifstream file_lumen("D:/UCB 25Spring/CS 284A/Lumen/src/shaders/lumen.comp");
+	std::string code_lumen((std::istreambuf_iterator<char>(file_lumen)), std::istreambuf_iterator<char>());
+	const char* src_lumen = code_lumen.c_str();
+	glShaderSource(cs_lumen, 1, &src_lumen, NULL);
+	glCompileShader(cs_lumen);
+	glAttachShader(lumenShader, cs_lumen);
+	glLinkProgram(lumenShader);
+	GLint lumenLinked = 0;
+	glGetProgramiv(lumenShader, GL_LINK_STATUS, &lumenLinked);
+	if (!lumenLinked) {
+		char infoLog[512];
+		glGetProgramInfoLog(lumenShader, 512, NULL, infoLog);
+		std::cerr << "Lumen shader linking failed:\n" << infoLog << std::endl;
+	}
+	glDeleteShader(cs_lumen);
 
 	// Compile and link the ray shader
 	rayShader = glCreateProgram();
@@ -158,9 +200,9 @@ SDFRenderer::~SDFRenderer() {
 	glDeleteProgram(fullscreenShader);
 }
 
-void SDFRenderer::render() {
-	// Use the ray shader
-	glUseProgram(rayShader);
+void SDFRenderer::lumenUpdate(int numsample) {
+	// Use the Lumen shader
+	glUseProgram(lumenShader);
 	// Bind the arrays
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sdfSizeArray_g);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sdfCoordArray_g);
@@ -168,9 +210,35 @@ void SDFRenderer::render() {
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, objCardArray_g);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, cardSizeArray_g);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, cardCoordArray_g);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, cardNormalArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, cardSurfaceArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, cardPointArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, cardRadianceArray_g);
+	// Upload uniforms
+	glUniform1i(glGetUniformLocation(lumenShader, "uNumSurfacePoints"), num_surface_pts);
+	glUniform1i(glGetUniformLocation(lumenShader, "uNumObjects"), nanite_meshes.size());
+	glUniform1i(glGetUniformLocation(lumenShader, "seed"), static_cast<int>(time(nullptr)));
+	glUniform1i(glGetUniformLocation(lumenShader, "uNumSample"), numsample);
+	// Dispatch compute shader
+	int groups_x = (total_card_voxels + 63) / 64;
+	glDispatchCompute(groups_x, 1, 1);
+	glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT); // ensure writes are visible
+}
+
+void SDFRenderer::render() {
+	// Use the ray shader
+	glUseProgram(rayShader);
 	// Bind the screen texture
-	glBindImageTexture(7, screenTexture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+	glBindImageTexture(0, screenTexture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+	// Bind the arrays
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sdfSizeArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sdfCoordArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, sdfArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, objCardArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, cardSizeArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, cardCoordArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, cardSurfaceArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, cardPointArray_g);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, cardRadianceArray_g);
 	
 	// Camera and screen parameters
 	Vector3D camPos = camera->position();
@@ -226,11 +294,11 @@ void SDFRenderer::visualizeCards() {
 	glDisable(GL_LIGHTING);
 	glLineWidth(1.0f);              // make lines visible
 	for (int i = 0; i < nanite_meshes.size(); ++i) {
-		const auto& nanite_cards = nanite_meshes[i].cards;
+		const auto& nanite_cards = nanite_meshes[i].nanite_cards;
 		for (const auto& card : nanite_cards) {
-			const Eigen::Vector3f& o = card.origin;
-			const Eigen::Matrix3f& r = card.rotation;
-			const Eigen::Vector3f& e = card.extent;
+			const Eigen::Vector3f& o = card.box.origin;
+			const Eigen::Matrix3f& r = card.box.rotation;
+			const Eigen::Vector3f& e = card.box.extent;
 
 			// Basis-scaled axes
 			Eigen::Vector3f x = r.col(0) * e.x();
@@ -271,6 +339,7 @@ void SDFRenderer::visualizeCards() {
 			glEnd();
 		}
 	}
+
 }
 
 void SDFRenderer::moveControlMesh(Vector3D delta) {
@@ -295,7 +364,23 @@ void SDFRenderer::moveControlMesh(Vector3D delta) {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 	// Move the cards
-	for (auto& card : control.cards) {
-		card.origin += Eigen::Vector3f(delta.x, delta.y, delta.z);
+	for (auto& card : control.nanite_cards) {
+		card.box.origin += Eigen::Vector3f(delta.x, delta.y, delta.z);
+	}
+
+	// for all cards from objcardArray_g[control_obj_idx * 2] with length objcardArray_g[control_obj_idx * 2 + 1]
+	// Update the cardCoordArray_g at [control_obj_idx * 12 + 0 : control_obj_idx * 12 + 3]
+	for (int i = 0; i < control.nCards; ++i) {
+		auto& card = control.nanite_cards[i];
+		float new_card_origin[3] = {
+			card.box.origin.x(),
+			card.box.origin.y(),
+			card.box.origin.z()
+		};
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, cardCoordArray_g);
+		glBufferSubData(GL_SHADER_STORAGE_BUFFER,
+			(control.cardBias + i) * 12 * sizeof(float),
+			3 * sizeof(float),
+			new_card_origin);
 	}
 }

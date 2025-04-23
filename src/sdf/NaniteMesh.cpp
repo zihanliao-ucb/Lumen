@@ -330,8 +330,7 @@ namespace CGL {
 			card.box = obb;
 			card.setSize(nominalSize);
 
-			std::cout << "Card " << i << ": " << card.box.extent.transpose() << std::endl;
-			std::cout << "Card size: " << card.size.transpose() << std::endl;
+			std::cout << "Card size: " << card.size.transpose() << " " << card.box.extent.transpose() << std::endl;
 
 			card.resetData();
 			card.bias = bias;
@@ -350,10 +349,13 @@ namespace CGL {
 		for (std::pair<Vector3D, Vector3D>& point : points) {
 			Eigen::Vector3f p = Vector3f_fromCGL(point.first);
 			Eigen::Vector3f normal = Vector3f_fromCGL(point.second);
+			if (mesh->reverseNormals) {
+				normal = -normal;
+			}
 
 			for (int i = 0; i < nanite_cards.size(); ++i) {
 				NaniteCard& card = nanite_cards[i];
-				card.inflate(p, normal);
+				card.inflate(p, normal.normalized());
 			}
 		}
 	}

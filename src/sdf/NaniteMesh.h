@@ -49,7 +49,9 @@ namespace CGL {
 		Eigen::Vector3i size; // size of the card
 		int bias; // bias of the card
 		Eigen::Vector3f voxelSize; // size of each voxel in the card
+		std::vector<Eigen::Vector3f> positions;
 		std::vector<Eigen::Vector3f> normals;
+		std::vector<Eigen::Vector3f> tangents;
 
 		void setSize(float nominalSize) {
 			float VoxelLength = std::sqrt(box.getSurfaceArea() / box.points.size());
@@ -101,18 +103,56 @@ namespace CGL {
 			//insert(local - voxelSize.y() * pbias, pnormal);
 		}
 
-		std::vector<float> getNormalData() const {
-			std::vector<float> data(normals.size() * 3);
+		void generatePositions() {
+			for (int i = 0; i < size.x(); ++i) {
+				for (int j = 0; j < size.y(); ++j) {
+					for (int k = 0; k < size.z(); ++k) {
+						int idx = i + j * size.x() + k * size.x() * size.y();
+						positions[idx] = box.origin + box.rotation * voxelSize.cwiseProduct(Eigen::Vector3f(i + 0.5, j + 0.5, k + 0.5));
+					}
+				}
+			}
+		}
+
+		void generateTangents() {
+			for (int i = 0; i < normals.size(); ++i) {
+				Eigen::Vector3f normal = normals[i];
+				if (normal.norm() > 0.0f) {
+					Eigen::Vector3f tangent = normal.cross(Eigen::Vector3f(1.0f, 0.0f, 0.0f));
+					if (tangent.norm() < 1e-6) {
+						tangent = normal.cross(Eigen::Vector3f(0.0f, 1.0f, 0.0f));
+					}
+					tangent.normalize();
+					tangents[i] = tangent;
+				}
+				else {
+					tangents[i] = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
+				}
+			}
+		}
+
+		std::vector<float> getPointData() {
+			generatePositions();
+			generateTangents();
+			std::vector<float> data(normals.size() * 9);
 			for (size_t i = 0; i < normals.size(); ++i) {
-				data[i * 3] = normals[i].x();
-				data[i * 3 + 1] = normals[i].y();
-				data[i * 3 + 2] = normals[i].z();
+				data[i * 9 + 0] = positions[i].x();
+				data[i * 9 + 1] = positions[i].y();
+				data[i * 9 + 2] = positions[i].z();
+				data[i * 9 + 3] = normals[i].x();
+				data[i * 9 + 4] = normals[i].y();
+				data[i * 9 + 5] = normals[i].z();
+				data[i * 9 + 6] = tangents[i].x();
+				data[i * 9 + 7] = tangents[i].y();
+				data[i * 9 + 8] = tangents[i].z();
 			}
 			return data;
 		}
 
 		void resetData() {
-			normals.resize(size.x() * size.y() * size.z(), Eigen::Vector3f(0.0f, 0.0f, 0.0f));
+			positions.resize(size.x() * size.y() * size.z(), Eigen::Vector3f(0.0f, 0.0f, 0.0f));
+			normals.resize(size.x() * size.y() * size.z(), Eigen::Vector3f(1.0f, 0.0f, 0.0f));
+			tangents.resize(size.x() * size.y() * size.z(), Eigen::Vector3f(1.0f, 0.0f, 0.0f));
 		}
 	};
 

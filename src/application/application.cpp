@@ -160,8 +160,9 @@ void Application::render() {
     case RENDER_MODE:
       //renderer->update_screen();
       //sdf_renderer->computeSDF();
+			sdf_renderer->lumenUpdate(64);
       sdf_renderer->render();
-			sdf_renderer->visualizeCards();
+			//sdf_renderer->visualizeCards();
       break;
   }
 
@@ -275,6 +276,10 @@ void Application::load(SceneInfo* sceneInfo) {
 					std::cout << "controll mesh name is: " << node.name << std::endl;
           controll_mesh = static_cast<GLScene::Mesh*>(cur_mesh);
         }
+				if (node.name == "ceiling" || node.name == "floor" || node.name == "leftWall" || node.name == "rightWall" || node.name == "backWall") {
+          GLScene::Mesh* mesh = static_cast<GLScene::Mesh*>(cur_mesh);
+					mesh->reverseNormals = true;
+				}
         break;
       }
       case Collada::Instance::MATERIAL:
@@ -315,6 +320,9 @@ void Application::load(SceneInfo* sceneInfo) {
   // set default draw styles for meshEdit -
   scene->set_draw_styles(&defaultStyle, &hoverStyle, &selectStyle);
 	sdf_renderer = new SDFRenderer(&camera, scene, controll_mesh);
+  for (int i = 0; i < 10; i++) {
+		sdf_renderer->lumenUpdate(64);
+  }
 }
 
 void Application::init_camera(CameraInfo& cameraInfo,

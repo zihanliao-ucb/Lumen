@@ -278,8 +278,6 @@ class EmissionBSDF : public BSDF {
 
   void render_debugger_node();
 
- private:
-
   Vector3D radiance;
   CosineWeightedHemisphereSampler3D sampler;
 
