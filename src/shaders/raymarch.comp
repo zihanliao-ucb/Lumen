@@ -486,9 +486,15 @@ void main() {
 
             if (bounce < 1) {
                 radiance += throughput * getDirectLight(hitPoint, rayDir, hitObj);
+                vec3 emission = vec3(
+                    cardSurface[hitObj * 7 + 4],
+                    cardSurface[hitObj * 7 + 5],
+                    cardSurface[hitObj * 7 + 6]
+                );
+                radiance += emission;
             } else {
-                radiance += throughput * getCardRadiance(hitPoint, rayDir, hitObj);
-                // radiance += throughput * getDirectLight(hitPoint, rayDir, hitObj);
+                // radiance += throughput * getCardRadiance(hitPoint, rayDir, hitObj);
+                radiance += throughput * getDirectLight(hitPoint, rayDir, hitObj);
                 break;
             }
 
