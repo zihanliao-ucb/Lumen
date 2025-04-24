@@ -17,11 +17,25 @@ uniform int uNumObjects;
 uniform int seed;
 uniform int uNumSample;
 
+uniform vec3 lightPosition;
+uniform vec3 lightDirection;
+uniform vec3 lightDimX;
+uniform vec3 lightDimY;
+uniform vec3 lightRadiance;
+uniform float lightArea;
+
 const int maxSteps = 128;
 const float epsilon = 0.005;
 const float maxMarchDist = 10.0;
 const float PI = 3.14159265359;
+const int numRays = 16;
 
+int glob_seed = seed;
+
+int randInt(inout int state, int range) {
+    state = (state * 48271) % 2147483647; // classic LCG
+    return state % range;
+}
 
 float sampleAt(ivec3 coord, ivec3 size, int sdfBias, float bv) {
     if (any(lessThan(coord, ivec3(0))) || any(greaterThanEqual(coord, size)))
@@ -154,14 +168,14 @@ vec3 sampleTangentAt(ivec3 coord, ivec3 size, int bias) {
 }
 
 vec3 getRadianceDirection(vec3 n_world, vec3 t_world, int ray_id, int subray_id, int num_subray, out float pdf) {
-    int x = ray_id % 8;
-    int y = ray_id / 8;
+    int x = ray_id % int(sqrt(numRays));
+    int y = ray_id / int(sqrt(numRays));
     int subray_per_side = int(sqrt(num_subray));
     int sub_x = subray_id % subray_per_side;
     int sub_y = subray_id / subray_per_side;
 
-    float u1 = (float(x) + (float(sub_x) + 0.5) / float(subray_per_side)) / 8.0;
-    float u2 = (float(y) + (float(sub_y) + 0.5) / float(subray_per_side)) / 8.0;
+    float u1 = (float(x) + (float(sub_x) + 0.5) / float(subray_per_side)) / sqrt(numRays);
+    float u2 = (float(y) + (float(sub_y) + 0.5) / float(subray_per_side)) / sqrt(numRays);
 
     float theta = acos(u1);           // polar angle
     float phi = 2.0 * PI * u2;        // azimuthal angle
@@ -182,23 +196,6 @@ vec3 getRadianceDirection(vec3 n_world, vec3 t_world, int ray_id, int subray_id,
     return d_world;
 }
 
-int getRadianceId(vec3 n_world, vec3 t_world, out float pdf) {
-    vec3 B = normalize(cross(n_world, t_world));
-    vec3 T = normalize(cross(B, n_world));
-    vec3 N = normalize(n_world);
-    vec3 d_local = vec3(dot(d_world, T), dot(d_world, B), dot(d_world, N));
-    float theta = acos(d_local.z);
-    float phi = atan(d_local.y, d_local.x) + PI;
-    float u1 = cos(theta);
-    float u2 = phi / (2.0 * PI);
-    int x = clamp(int(u1 * 8.0), 0, 7);
-    int y = clamp(int(u2 * 8.0), 0, 7);
-    int ray_id = y * 8 + x;
-    pdf = 1.0 / (2.0 * PI);
-    return ray_id;
-}
-
-
 vec3 sampleRadianceAt(int obj_idx, ivec3 coord, ivec3 size, int bias, vec3 p_world, vec3 d_world) {
     vec3 n_world = sampleNormal(coord, size, bias);
     vec3 t_world = sampleTangentAt(coord, size, bias);
@@ -209,31 +206,143 @@ vec3 sampleRadianceAt(int obj_idx, ivec3 coord, ivec3 size, int bias, vec3 p_wor
         cardSurface[obj_idx * 7 + 2]
     );
     float roughness = cardSurface[obj_idx * 7 + 3];
-    vec3 emission = vec3(
-        cardSurface[obj_idx * 7 + 4],
-        cardSurface[obj_idx * 7 + 5],
-        cardSurface[obj_idx * 7 + 6]
-    );
     float threshold = 1.0 - roughness;
     threshold = clamp(threshold, 0.0, 1.0);
     vec3 radiance = vec3(0.0);
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < numRays; i++) {
         float pdf;
         vec3 radiance_v = getRadianceDirection(n_world, t_world, i, 1, 1, pdf);
         vec3 radiance_L = vec3(
-            cardRadiance[idx * 64 * 3 + i * 3 + 0],
-            cardRadiance[idx * 64 * 3 + i * 3 + 1],
-            cardRadiance[idx * 64 * 3 + i * 3 + 2]
+            cardRadiance[idx * numRays * 3 + i * 3 + 0],
+            cardRadiance[idx * numRays * 3 + i * 3 + 1],
+            cardRadiance[idx * numRays * 3 + i * 3 + 2]
         );
         float abs_cos_theta = abs(dot(n_world, radiance_v));
         vec3 r = reflect(d_world, n_world);
         float cosine_similarity = max(dot(normalize(r), radiance_v), 0.01);
         if (cosine_similarity > threshold - 0.01) {
-            radiance += reflectance * radiance_L * abs_cos_theta / pdf;
+            radiance += reflectance * radiance_L * abs_cos_theta / pdf / roughness;
             // radiance += vec3(0.33) * radiance_L * abs_cos_theta / pdf;
         }
     }
-    return (radiance / 64.0 / PI + emission);
+    return radiance / float(numRays) / PI;
+}
+
+bool intersect(vec3 rayo, vec3 rayd, int obj_idx, out float t_hit) {
+    int sizeArrayBias = obj_idx * 4;
+    int coordArrayBias = obj_idx * 12;
+    
+    ivec3 size = ivec3(
+        sdfSize[sizeArrayBias + 0],
+        sdfSize[sizeArrayBias + 1],
+        sdfSize[sizeArrayBias + 2]
+    );
+    int sdfBias = sdfSize[sizeArrayBias + 3];
+    vec3 sdfOrigin = vec3(
+        sdfCoord[coordArrayBias + 0],
+        sdfCoord[coordArrayBias + 1],
+        sdfCoord[coordArrayBias + 2]
+    );
+    mat3 sdfTransform = mat3(
+        vec3(sdfCoord[coordArrayBias + 3], sdfCoord[coordArrayBias + 4], sdfCoord[coordArrayBias + 5]),
+        vec3(sdfCoord[coordArrayBias + 6], sdfCoord[coordArrayBias + 7], sdfCoord[coordArrayBias + 8]),
+        vec3(sdfCoord[coordArrayBias + 9], sdfCoord[coordArrayBias +10], sdfCoord[coordArrayBias +11])
+    );
+    vec3 emission = vec3(
+        cardSurface[obj_idx * 7 + 4],
+        cardSurface[obj_idx * 7 + 5],
+        cardSurface[obj_idx * 7 + 6]
+    );
+
+    vec3 rayo_sdf = sdfTransform * (rayo - sdfOrigin);
+    vec3 rayd_sdf = sdfTransform * rayd;
+
+    // Intersect ray_sdf with the bounding box with min (0, 0, 0) and max vec3(size)
+    float t_near, t_far;
+    if (!intersectAABB(rayo_sdf, rayd_sdf, vec3(0.0), vec3(size), t_near, t_far))
+        return false;
+
+    // Ray marching in the sdf space
+    float t = max(t_near, 0.0) + 0.0001;
+    for (int i = 0; i < maxSteps && t < t_far; ++i) {
+        vec3 p = rayo_sdf + t * rayd_sdf;
+        float d = sampleSDF(p, size, sdfBias);
+        if (abs(d) < epsilon) {
+            t_hit = t;
+            return true;
+        }
+        t += d;
+        if (t > maxMarchDist) break;
+    }
+
+    // No hit
+    t_hit = maxMarchDist;
+    return false;
+}
+
+vec3 get_direct_light(int obj_idx, ivec3 coord, ivec3 size, int bias, vec3 p_world, vec3 d_world) {
+    vec3 n_world = sampleNormal(coord, size, bias);
+    if (length(n_world) < 0.1) return vec3(0.0);
+
+    vec3 reflectance = vec3(
+        cardSurface[obj_idx * 7 + 0],
+        cardSurface[obj_idx * 7 + 1],
+        cardSurface[obj_idx * 7 + 2]
+    );
+    float roughness = cardSurface[obj_idx * 7 + 3];
+
+    vec3 radiance = vec3(0.0);
+    const int ns_light_samples = 16;
+    const int sqrt_ns = int(sqrt(float(ns_light_samples)));
+
+    vec3 light_pos = lightPosition;
+    vec3 light_dir = lightDirection;
+    vec3 light_x = lightDimX;
+    vec3 light_y = lightDimY;
+    vec3 light_radiance = lightRadiance;
+    float light_area = lightArea;
+
+    for (int s = 0; s < ns_light_samples; ++s) {
+        // Uniform sample in [-0.5, 0.5]
+        int x = s % sqrt_ns;
+        int y = s / sqrt_ns;
+        vec2 u = (vec2(x, y) + vec2(0.5)) / float(sqrt_ns) - 0.5;
+        vec3 target = light_pos + u.x * light_x + u.y * light_y;
+        vec3 d = target - p_world;
+        float dist2 = dot(d, d);
+        float dist = sqrt(dist2);
+        vec3 wi = d / dist;
+
+        float cosTheta = dot(-wi, light_dir);
+        if (cosTheta <= 0.0) continue;
+
+        float pdf = dist2 / (light_area * cosTheta);
+        float abs_cos_theta = max(dot(n_world, wi), 0.0);
+
+        // Shadow ray test
+        bool occluded = false;
+        for (int obj = 0; obj < uNumObjects; ++obj) {
+            float t_hit;
+            if (obj == obj_idx) continue;
+            if (intersect(p_world + 0.001 * wi, wi, obj, t_hit)) {
+                if (t_hit < dist - 0.01) {
+                    occluded = true;
+                    break;
+                }
+            }
+        }
+
+        if (!occluded && pdf > 1e-6) {
+            // BRDF: assume Lambertian here
+            vec3 r = reflect(d_world, n_world);
+            float cosine_similarity = max(dot(normalize(r), wi), 0.01);
+            if (cosine_similarity < 1 - roughness) continue;
+            vec3 brdf = reflectance / PI / roughness;
+            radiance += brdf * light_radiance * abs_cos_theta / pdf;
+        }
+    }
+
+    return radiance / float(ns_light_samples);
 }
 
 vec3 getCardRadiance(vec3 p_world, vec3 d_world, int obj_idx) {
@@ -260,63 +369,10 @@ vec3 getCardRadiance(vec3 p_world, vec3 d_world, int obj_idx) {
         ivec3 base = ivec3(floor(p_card));
         if (any(lessThan(base, ivec3(0))) || any(greaterThanEqual(base, size)))
             continue;
-        return sampleRadianceAt(obj_idx, base, size, cardBias, p_world, d_world);
+        return sampleRadianceAt(obj_idx, base, size, cardBias, p_world, d_world) + get_direct_light(obj_idx, base, size, cardBias, p_world, d_world);
+        // return get_direct_light(obj_idx, base, size, cardBias, p_world, d_world);
     }
     return vec3(1.0);
-}
-
-bool intersect(vec3 rayo, vec3 rayd, int obj_idx, out float t_hit, out vec3 radiance) {
-    int sizeArrayBias = obj_idx * 4;
-    int coordArrayBias = obj_idx * 12;
-    
-    ivec3 size = ivec3(
-        sdfSize[sizeArrayBias + 0],
-        sdfSize[sizeArrayBias + 1],
-        sdfSize[sizeArrayBias + 2]
-    );
-    int sdfBias = sdfSize[sizeArrayBias + 3];
-    vec3 sdfOrigin = vec3(
-        sdfCoord[coordArrayBias + 0],
-        sdfCoord[coordArrayBias + 1],
-        sdfCoord[coordArrayBias + 2]
-    );
-    mat3 sdfTransform = mat3(
-        vec3(sdfCoord[coordArrayBias + 3], sdfCoord[coordArrayBias + 4], sdfCoord[coordArrayBias + 5]),
-        vec3(sdfCoord[coordArrayBias + 6], sdfCoord[coordArrayBias + 7], sdfCoord[coordArrayBias + 8]),
-        vec3(sdfCoord[coordArrayBias + 9], sdfCoord[coordArrayBias +10], sdfCoord[coordArrayBias +11])
-    );
-
-    vec3 rayo_sdf = sdfTransform * (rayo - sdfOrigin);
-    vec3 rayd_sdf = sdfTransform * rayd;
-
-    // Intersect ray_sdf with the bounding box with min (0, 0, 0) and max vec3(size)
-    float t_near, t_far;
-    if (!intersectAABB(rayo_sdf, rayd_sdf, vec3(0.0), vec3(size), t_near, t_far))
-        return false;
-
-    // Ray marching in the sdf space
-    float t = max(t_near, 0.0) + 0.0001;
-    for (int i = 0; i < maxSteps && t < t_far; ++i) {
-        vec3 p = rayo_sdf + t * rayd_sdf;
-        float d = sampleSDF(p, size, sdfBias);
-        if (abs(d) < epsilon) {
-            t_hit = t;
-            radiance = getCardRadiance(rayo + t * rayd, rayd, obj_idx);
-            return true;
-        }
-        t += d;
-        if (t > maxMarchDist) break;
-    }
-
-    // No hit
-    t_hit = maxMarchDist;
-    radiance = vec3(0.0);
-    return false;
-}
-
-int randInt(inout int state, int range) {
-    state = (state * 48271) % 2147483647; // classic LCG
-    return state % range;
 }
 
 void main() {
@@ -338,76 +394,44 @@ void main() {
     );
 
     if (length(n_world) < 0.1) {
-        cardRadiance[pix * 64 * 3 + 0] = 0.0;
-        cardRadiance[pix * 64 * 3 + 1] = 0.0;
-        cardRadiance[pix * 64 * 3 + 2] = 0.0;
+        cardRadiance[pix * numRays * 3 + 0] = 0.0;
+        cardRadiance[pix * numRays * 3 + 1] = 0.0;
+        cardRadiance[pix * numRays * 3 + 2] = 0.0;
         return;
     }
 
     int state = seed + pix;
 
-    float radiance_buffer[64];
-    int radiance_idx[64];
-    for (int i = 0; i < 64; ++i) {
-        radiance_buffer[i] = length(vec3(cardRadiance[pix * 64 * 3 + i * 3 + 0], 
-                                         cardRadiance[pix * 64 * 3 + i * 3 + 1],
-                                         cardRadiance[pix * 64 * 3 + i * 3 + 2]));
-        radiance_idx[i] = i;
-    }
-    // Sort the radiance buffer, larger values first
-    for (int i = 0; i < 64; ++i) {
-        for (int j = i + 1; j < 64; ++j) {
-            if (radiance_buffer[i] < radiance_buffer[j]) {
-                float tmp = radiance_buffer[i];
-                radiance_buffer[i] = radiance_buffer[j];
-                radiance_buffer[j] = tmp;
-                int tmp_idx = radiance_idx[i];
-                radiance_idx[i] = radiance_idx[j];
-                radiance_idx[j] = tmp_idx;
-            }
-        }
-    }
-
-    for (int ss = 0; ss < uNumSample; ++ss) {
-        int i, num_subray;
-        if (ss < uNumSample / 2) {
-            i = radiance_idx[randInt(state, 16)];
-            num_subray = 16;
-        } else {
-            i = radiance_idx[randInt(state, 48) + 16];
-            num_subray = 4;
-        }
-        if (uNumSample == 64) {
-            i = ss;
-            num_subray = 16;
-        }
+    for (int ss = 0; ss < 16; ++ss) {
+        int i = ss, num_subray = 1;
         vec3 rayo;
         float pdf;
         vec3 tot_radiance = vec3(0.0);
         for (int j = 0; j < num_subray; j ++) {
             vec3 rayd = getRadianceDirection(n_world, t_world, i, j, num_subray, pdf);
-            rayo = p_world + 0.25 * rayd;
+            rayo = p_world + 0.2 * rayd;
 
             float mint = maxMarchDist;
             vec3 min_radiance = vec3(0.0);
             for (int n = 0; n < uNumObjects; ++n) {
                 float t_hit;
                 vec3 radiance;
-                if (intersect(rayo, rayd, n, t_hit, radiance)) {
+                if (intersect(rayo, rayd, n, t_hit)) {
                     if (t_hit < mint) {
                         mint = t_hit;
-                        min_radiance = radiance;
+                        min_radiance = getCardRadiance(rayo + t_hit * rayd, rayd, n);
                     }
                 }
             }
             if (mint < maxMarchDist) {
                 tot_radiance += min_radiance;
+                continue;
             }
         }
         vec3 avg_radiance = tot_radiance / float(num_subray);
 
-        cardRadiance[pix * 64 * 3 + i * 3 + 0] = avg_radiance.x;
-        cardRadiance[pix * 64 * 3 + i * 3 + 1] = avg_radiance.y;
-        cardRadiance[pix * 64 * 3 + i * 3 + 2] = avg_radiance.z;
+        cardRadiance[pix * numRays * 3 + i * 3 + 0] = avg_radiance.x;
+        cardRadiance[pix * numRays * 3 + i * 3 + 1] = avg_radiance.y;
+        cardRadiance[pix * numRays * 3 + i * 3 + 2] = avg_radiance.z;
     }
 }

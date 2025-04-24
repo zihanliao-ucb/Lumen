@@ -6,6 +6,7 @@
 #include "scene/gl_scene/scene.h"
 #include "scene/gl_scene/mesh.h" 
 #include "sdf/NaniteMesh.h"
+#include "scene/light.h"
 
 #include <iostream>
 #include <vector>

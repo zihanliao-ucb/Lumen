@@ -96,7 +96,7 @@ void Application::init() {
   // NOTE: there's a chicken-and-egg problem here, because loadScene
   // requires init, and init requires init_camera (which is only called by
   // loadScene).
-  screenW = 800; screenH = 600; // Default value
+  screenW = 400; screenH = 300; // Default value
   CameraInfo cameraInfo;
   cameraInfo.hFov = 50;
   cameraInfo.vFov = 35;
@@ -146,6 +146,7 @@ void Application::update_style() {
 }
 
 void Application::render() {
+	static bool frame = 0;
   update_gl_camera();
   switch (mode) {
     case EDIT_MODE:
@@ -160,7 +161,7 @@ void Application::render() {
     case RENDER_MODE:
       //renderer->update_screen();
       //sdf_renderer->computeSDF();
-			sdf_renderer->lumenUpdate(64);
+      sdf_renderer->lumenUpdate(1);
       sdf_renderer->render();
 			//sdf_renderer->visualizeCards();
       break;
@@ -177,7 +178,9 @@ void Application::update_gl_camera() {
   GLint view[4];
   glGetIntegerv(GL_VIEWPORT, view);
   if (view[2] != screenW || view[3] != screenH) {
-    resize(view[2], view[3]);
+    //resize(view[2], view[3]);
+		// upload the camera parameters to the GL_VIEWPORT
+		glViewport(0, 0, screenW, screenH);
   }
 
   // Control the camera to look at the mesh.
@@ -194,6 +197,7 @@ void Application::update_gl_camera() {
 }
 
 void Application::resize(size_t w, size_t h) {
+  //std::cout << screenH << " " << screenW << " " << h << " " << w << std::endl;
   screenW = w;
   screenH = h;
   camera.set_screen_size(w, h);
@@ -321,7 +325,7 @@ void Application::load(SceneInfo* sceneInfo) {
   scene->set_draw_styles(&defaultStyle, &hoverStyle, &selectStyle);
 	sdf_renderer = new SDFRenderer(&camera, scene, controll_mesh);
   for (int i = 0; i < 10; i++) {
-		sdf_renderer->lumenUpdate(64);
+		sdf_renderer->lumenUpdate(16);
   }
 }
 

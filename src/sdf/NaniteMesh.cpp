@@ -15,8 +15,8 @@ namespace CGL {
 		}
 		// Get the cards
 		splitOBBs(cards, vertices, 12);
-		initCards(0.001f);
-		sampleComputeCards(0.001f);
+		initCards(0.004f);
+		sampleComputeCards(0.004f);
 	}
 
 	NaniteMesh::~NaniteMesh() {
@@ -48,15 +48,15 @@ namespace CGL {
 		float fx = static_cast<float>(size.x);
 		float fy = static_cast<float>(size.y);
 		float fz = static_cast<float>(size.z);
-		vx = fx < 0.2f * sdfVoxelLength ? std::max(fx, 0.01f) : sdfVoxelLength;
+		vx = fx < 0.2f * sdfVoxelLength ? std::max(fx, MIN_VOXEL_LENGTH) : sdfVoxelLength;
 		sx = std::min(std::max(static_cast<int>(std::ceil(size.x / vx)), 1), 128);
-		vx = std::max(static_cast<float>(size.x) / sx, 0.01f);
-		vy = fy < 0.2f * sdfVoxelLength ? std::max(fy, 0.01f) : sdfVoxelLength;
+		vx = std::max(static_cast<float>(size.x) / sx, MIN_VOXEL_LENGTH);
+		vy = fy < 0.2f * sdfVoxelLength ? std::max(fy, MIN_VOXEL_LENGTH) : sdfVoxelLength;
 		sy = std::min(std::max(static_cast<int>(std::ceil(size.y / vy)), 1), 128);
-		vy = std::max(static_cast<float>(size.y) / sy, 0.01f);
-		vz = fz < 0.2f * sdfVoxelLength ? std::max(fz, 0.01f) : sdfVoxelLength;
+		vy = std::max(static_cast<float>(size.y) / sy, MIN_VOXEL_LENGTH);
+		vz = fz < 0.2f * sdfVoxelLength ? std::max(fz, MIN_VOXEL_LENGTH) : sdfVoxelLength;
 		sz = std::min(std::max(static_cast<int>(std::ceil(size.z / vz)), 1), 128);
-		vz = std::max(static_cast<float>(size.z) / sz, 0.01f);
+		vz = std::max(static_cast<float>(size.z) / sz, MIN_VOXEL_LENGTH);
 		std::cout << "Voxel Length: " << vx << " " << vy << " " << vz << sdfVoxelLength << " SDF size: " << sx << " " << sy << " " << sz << std::endl;
 		// Set the origin of the sdf
 		ox = static_cast<float>(min.x);

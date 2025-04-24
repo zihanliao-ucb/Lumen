@@ -41,7 +41,12 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 		Vector3D reflectance = static_cast<DiffuseBSDF*>(nm.mesh->get_bsdf())->reflectance;
 		Eigen::Vector3f color = Vector3f_fromCGL(reflectance);
 		cardSurfaceArray.insert(cardSurfaceArray.end(), color.data(), color.data() + 3);
-		cardSurfaceArray.push_back(1.0); // roughness
+		if (nm.nanite_cards.back().box.points.size() > 5) {
+			cardSurfaceArray.push_back(0.3f); // roughness
+		}
+		else {
+			cardSurfaceArray.push_back(1.0f); // roughness
+		}
 
 		Vector3D emission = nm.mesh->get_bsdf()->get_emission();
 		Eigen::Vector3f emissionColor = Vector3f_fromCGL(emission);
@@ -67,7 +72,7 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
   }
 	total_card_voxels = cardArrayBias;
 
-	cardRadianceArray.resize(total_card_voxels * 64 * 3, 0.0f);
+	cardRadianceArray.resize(total_card_voxels * 16 * 3, 0.0f);
 
 	std::cout << "Total card size: " << total_card_voxels << std::endl;
 	std::cout << "Screen size: " << camera->screen_width() * camera->screen_height() << std::endl;
@@ -112,6 +117,7 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 	// Create the screen texture
 	glGenTextures(1, &screenTexture);
 	glBindTexture(GL_TEXTURE_2D, screenTexture);
+	std::cout << "Screen size: " << camera->screen_width() << " " << camera->screen_height() << std::endl;
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, camera->screen_width(), camera->screen_height(), 0, GL_RGBA, GL_FLOAT, nullptr);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -218,6 +224,28 @@ void SDFRenderer::lumenUpdate(int numsample) {
 	glUniform1i(glGetUniformLocation(lumenShader, "uNumObjects"), nanite_meshes.size());
 	glUniform1i(glGetUniformLocation(lumenShader, "seed"), static_cast<int>(time(nullptr)));
 	glUniform1i(glGetUniformLocation(lumenShader, "uNumSample"), numsample);
+	// Upload area light info (assumes only one light)
+	SceneObjects::AreaLight* light = static_cast<SceneObjects::AreaLight*>(scene->lights[0]->get_static_light());
+
+	GLint loc;
+
+	loc = glGetUniformLocation(lumenShader, "lightPosition");
+	glUniform3f(loc, light->position.x, light->position.y, light->position.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightDirection");
+	glUniform3f(loc, light->direction.x, light->direction.y, light->direction.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightDimX");
+	glUniform3f(loc, light->dim_x.x, light->dim_x.y, light->dim_x.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightDimY");
+	glUniform3f(loc, light->dim_y.x, light->dim_y.y, light->dim_y.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightRadiance");
+	glUniform3f(loc, light->radiance.x, light->radiance.y, light->radiance.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightArea");
+	glUniform1f(loc, static_cast<float>(light->area));
 	// Dispatch compute shader
 	int groups_x = (total_card_voxels + 63) / 64;
 	glDispatchCompute(groups_x, 1, 1);
@@ -259,6 +287,28 @@ void SDFRenderer::render() {
 	glUniform1f(glGetUniformLocation(rayShader, "uTanFovY"), tanFovY);
 	glUniform1f(glGetUniformLocation(rayShader, "uAspect"), static_cast<float>(camera->aspect_ratio()));
 	glUniform1i(glGetUniformLocation(rayShader, "uNumObjects"), nanite_meshes.size());
+	SceneObjects::AreaLight* light = static_cast<SceneObjects::AreaLight*>(scene->lights[0]->get_static_light());
+	GLint loc;
+
+	loc = glGetUniformLocation(lumenShader, "lightPosition");
+	glUniform3f(loc, light->position.x, light->position.y, light->position.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightDirection");
+	glUniform3f(loc, light->direction.x, light->direction.y, light->direction.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightDimX");
+	glUniform3f(loc, light->dim_x.x, light->dim_x.y, light->dim_x.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightDimY");
+	glUniform3f(loc, light->dim_y.x, light->dim_y.y, light->dim_y.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightRadiance");
+	glUniform3f(loc, light->radiance.x, light->radiance.y, light->radiance.z);
+
+	loc = glGetUniformLocation(lumenShader, "lightArea");
+	glUniform1f(loc, static_cast<float>(light->area));
+
+	glUniform1i(glGetUniformLocation(rayShader, "globalSeed"), static_cast<int>(time(nullptr)));
 
 	// Dispatch compute shader
 	int groups_x = (camera->screen_width() + 7) / 8;

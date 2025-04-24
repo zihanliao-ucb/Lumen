@@ -16,7 +16,7 @@
 #include <unordered_set>
 
 #define MAX_BOX_LENGTH (128)
-#define MIN_VOXEL_LENGTH (0.01f)
+#define MIN_VOXEL_LENGTH (0.005f)
 
 
 namespace CGL {
