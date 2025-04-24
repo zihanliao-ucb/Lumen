@@ -206,8 +206,6 @@ vec3 sampleRadianceAt(int obj_idx, ivec3 coord, ivec3 size, int bias, vec3 p_wor
         cardSurface[obj_idx * 7 + 2]
     );
     float roughness = cardSurface[obj_idx * 7 + 3];
-    float threshold = 1.0 - roughness;
-    threshold = clamp(threshold, 0.0, 1.0);
     vec3 radiance = vec3(0.0);
     for (int i = 0; i < numRays; i++) {
         float pdf;
@@ -218,12 +216,17 @@ vec3 sampleRadianceAt(int obj_idx, ivec3 coord, ivec3 size, int bias, vec3 p_wor
             cardRadiance[idx * numRays * 3 + i * 3 + 2]
         );
         float abs_cos_theta = abs(dot(n_world, radiance_v));
-        vec3 r = reflect(d_world, n_world);
-        float cosine_similarity = max(dot(normalize(r), radiance_v), 0.01);
-        if (cosine_similarity > threshold - 0.01) {
-            radiance += reflectance * radiance_L * abs_cos_theta / pdf / roughness;
-            // radiance += vec3(0.33) * radiance_L * abs_cos_theta / pdf;
+        
+        if (roughness > 0.5) {
+            radiance += reflectance * radiance_L * abs_cos_theta / pdf;
+        } else {
+            vec3 r = reflect(d_world, n_world);
+            float cosine_similarity = dot(normalize(r), radiance_v);
+            if (cosine_similarity > 0.9) {
+                radiance += reflectance * radiance_L;
+            }
         }
+        
     }
     return radiance / float(numRays) / PI;
 }
@@ -333,12 +336,16 @@ vec3 get_direct_light(int obj_idx, ivec3 coord, ivec3 size, int bias, vec3 p_wor
         }
 
         if (!occluded && pdf > 1e-6) {
-            // BRDF: assume Lambertian here
-            vec3 r = reflect(d_world, n_world);
-            float cosine_similarity = max(dot(normalize(r), wi), 0.01);
-            if (cosine_similarity < 1 - roughness) continue;
-            vec3 brdf = reflectance / PI / roughness;
-            radiance += brdf * light_radiance * abs_cos_theta / pdf;
+            if (roughness > 0.5) {
+                vec3 brdf = reflectance / PI;
+                radiance += brdf * light_radiance * abs_cos_theta / pdf;
+            } else {
+                vec3 r = reflect(d_world, n_world);
+                float cosine_similarity = dot(normalize(r), wi);
+                if (cosine_similarity > 0.9) {
+                    radiance += reflectance * light_radiance;
+                }
+            }
         }
     }
 

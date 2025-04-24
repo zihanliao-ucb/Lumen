@@ -337,12 +337,16 @@ vec3 get_direct_light(int obj_idx, ivec3 coord, ivec3 size, int bias, vec3 p_wor
         }
 
         if (!occluded && pdf > 1e-6) {
-            // BRDF: assume Lambertian here
-            vec3 r = reflect(d_world, n_world);
-            float cosine_similarity = max(dot(normalize(r), wi), 0.01);
-            if (cosine_similarity < 1 - roughness) continue;
-            vec3 brdf = reflectance / PI / roughness;
-            radiance += brdf * light_radiance * abs_cos_theta / pdf;
+            if (roughness > 0.5) {
+                vec3 brdf = reflectance / PI;
+                radiance += brdf * light_radiance * abs_cos_theta / pdf;
+            } else {
+                vec3 r = reflect(d_world, n_world);
+                float cosine_similarity = dot(normalize(r), wi);
+                if (cosine_similarity > 0.9) {
+                    radiance += reflectance * light_radiance;
+                }
+            }
         }
     }
 
@@ -416,31 +420,27 @@ float rand(inout uint state) {
     return float(lcg(state) % uint(100)) / 100.0; // 2^32
 }
 
-vec3 sampleHemisphereCosine(vec3 n, vec3 t, vec3 d_in, float roughness, inout uint seed, out float pdf) {
-    // Perfect reflection direction
-    vec3 r = normalize(reflect(-d_in, n));
+vec3 sampleHemisphereCosine(vec3 n, vec3 t, vec3 d_world, float roughness, inout uint seed, out float pdf) {
+    if (roughness > 0.5) {
+        float u1 = rand(seed);
+        float u2 = rand(seed);
+        float r = sqrt(u1);
+        float theta = 2.0 * PI * u2;
+        float x = r * cos(theta);
+        float y = r * sin(theta);
+        float z = sqrt(1.0 - u1);  // cosine-weighted hemisphere
 
-    // Construct a local frame around r
-    vec3 B = normalize(cross(r, abs(r.x) < 0.99 ? vec3(1, 0, 0) : vec3(0, 1, 0)));
-    vec3 T = normalize(cross(B, r));
-
-    // Cosine-weighted hemisphere sampling around reflection vector
-    float u1 = rand(seed);
-    float u2 = rand(seed);
-    float r_disk = sqrt(u1);
-    float phi = 2.0 * PI * u2;
-    float x = r_disk * cos(phi);
-    float y = r_disk * sin(phi);
-    float z = sqrt(1.0 - u1);
-
-    vec3 local_dir = vec3(x, y, z);
-    vec3 sampled_dir = normalize(T * local_dir.x + B * local_dir.y + r * local_dir.z);
-
-    // Apply roughness by slerping between perfect mirror and sampled direction
-    sampled_dir = normalize(mix(r, sampled_dir, roughness));
-
-    pdf = dot(sampled_dir, r) / PI;  // use cosine-weighted PDF w.r.t. perfect reflection direction
-    return sampled_dir;
+        vec3 B = normalize(cross(n, t));
+        vec3 T = normalize(cross(B, n));
+        vec3 local = vec3(x, y, z);
+        vec3 world = normalize(T * local.x + B * local.y + n * local.z);
+        pdf = z / PI;
+        return world;
+    } else {
+        vec3 r = reflect(d_world, n);
+        pdf = 1.0;
+        return normalize(r);
+    }
 }
 
 
@@ -484,17 +484,18 @@ void main() {
 
             vec3 hitPoint = rayOrigin + closestT * rayDir;
 
-            if (bounce < 1) {
-                radiance += throughput * getDirectLight(hitPoint, rayDir, hitObj);
-                vec3 emission = vec3(
+            if (bounce == 0) {
+                radiance +=vec3(
                     cardSurface[hitObj * 7 + 4],
                     cardSurface[hitObj * 7 + 5],
                     cardSurface[hitObj * 7 + 6]
                 );
-                radiance += emission;
-            } else {
-                // radiance += throughput * getCardRadiance(hitPoint, rayDir, hitObj);
+            }
+            if (bounce < 1) {
                 radiance += throughput * getDirectLight(hitPoint, rayDir, hitObj);
+            } else {
+                radiance += throughput * getCardRadiance(hitPoint, rayDir, hitObj);
+                // radiance += throughput * getDirectLight(hitPoint, rayDir, hitObj);
                 break;
             }
 
@@ -502,6 +503,7 @@ void main() {
             int start = objCard[hitObj * 2];
             int end = start + objCard[hitObj * 2 + 1];
             bool found = false;
+            float roughness = cardSurface[hitObj * 7 + 3];
 
             for (int i = start; i < end; ++i) {
                 ivec3 size = ivec3(cardSize[i * 4 + 0], cardSize[i * 4 + 1], cardSize[i * 4 + 2]);
@@ -523,16 +525,20 @@ void main() {
                     float pdf;
                     vec3 newDir = sampleHemisphereCosine(n_world, t_world, rayDir, roughness, seed, pdf);
 
-                    vec3 brdf = vec3(
+                    vec3 reflectance = vec3(
                         cardSurface[hitObj * 7 + 0],
                         cardSurface[hitObj * 7 + 1],
                         cardSurface[hitObj * 7 + 2]
-                    ) / PI;
+                    );
 
                     float cosTheta = max(dot(n_world, newDir), 0.0);
-                    throughput *= brdf * cosTheta / pdf;
+                    if (roughness > 0.5) {
+                        throughput *= reflectance * cosTheta / pdf / PI;
+                    } else {
+                        throughput *= reflectance;
+                    }
 
-                    rayOrigin = hitPoint + 0.02 * newDir;
+                    rayOrigin = hitPoint + 0.05 * newDir;
                     rayDir = newDir;
                     found = true;
                     break;

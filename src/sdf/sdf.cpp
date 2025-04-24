@@ -41,8 +41,8 @@ SDFRenderer::SDFRenderer(Camera* camera, GLScene::Scene* scene, GLScene::Mesh* c
 		Vector3D reflectance = static_cast<DiffuseBSDF*>(nm.mesh->get_bsdf())->reflectance;
 		Eigen::Vector3f color = Vector3f_fromCGL(reflectance);
 		cardSurfaceArray.insert(cardSurfaceArray.end(), color.data(), color.data() + 3);
-		if (nm.nanite_cards.back().box.points.size() > 5) {
-			cardSurfaceArray.push_back(0.3f); // roughness
+		if (nm.nanite_cards.back().box.points.size() < 5) {
+			cardSurfaceArray.push_back(0.7f); // roughness
 		}
 		else {
 			cardSurfaceArray.push_back(1.0f); // roughness
